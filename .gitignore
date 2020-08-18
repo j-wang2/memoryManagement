@@ -1,0 +1,6 @@
+## Ignore executables, object files, debugging files
+
+*.exe
+*.obj
+*.ilk
+*.pdb

@@ -61,12 +61,13 @@ initPFNarray(int numPages, int pageSize);
 PPTE
 initPTEarray(int numPages, int pageSize);
 
-// param: VA to check
-// function to walk PTEs
-// if PTE exists, return SUCCESS (2)?
-// if it doesn't
-// - dequeue from freed list
-// - return pointer to PFN entry, where it is used as leaf
+/*
+ * function
+ *  - gets page given a VA
+ *  - if PTE exists, return SUCCESS (2)?
+ *  - otherweise, dequeue from freed list and return pointer to PFN entry 
+ */
+
 faultStatus
 getPage(void* virtualAddress)
 {
