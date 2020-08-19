@@ -1,11 +1,7 @@
+#ifndef PAGEFILE_H
+#define PAGEFILE_H
 
-
-/*
- * enqueue: function to enqueue an item at head of specified list
- *   - enqueue newItem param at head of list with listHead
- * 
- * No return value
- */
+// #include "userMode-AWE-pageFile.h"
 
 /*
  * writePage: function to write out a given page (associated w PFN metadata) to pagefile
@@ -37,3 +33,5 @@ setPFBitIndex();
  */
 VOID
 clearPFBitIndex(ULONG_PTR pfVA);
+
+#endif

@@ -6,6 +6,9 @@
  */
 
 #include "userMode-AWE-pageFile.h"
+#include "enqueue-dequeue.h"
+#include "pageFile.h"
+
 
 /******* GLOBALS *****/
 void* leafVABlock;                  // starting address of memory block
@@ -819,7 +822,7 @@ zeroPage(ULONG_PTR PFN)
         return FALSE;
     }
 
-    // TODDO - CHECK SHOULD THIS (SETTING STATUS BITS) BE IN HERE
+    // TODO - CHECK SHOULD THIS (SETTING STATUS BITS) BE IN HERE
 
     // get associated PFN metadata
     PPFNdata metadata;

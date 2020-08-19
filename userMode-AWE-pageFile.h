@@ -135,8 +135,6 @@ extern listData listHeads[ACTIVE];
 #define modifiedListHead listHeads[MODIFIED]
 
 
-#include "enqueue-dequeue.h"
-
 /*
  * getPTEpermissions: function to convert input PTE's permissions (as separate bits) into a return PTEpermissions (3 consecutive bits)
  * 
@@ -304,32 +302,3 @@ zeroPage(ULONG_PTR PFN);
 
 BOOLEAN
 modifiedPageWriter();
-
-/*
- * writePage: write page associated with parameter PPFNdata to pagefile
- * 
- * Returns BOOLEAN
- *  - TRUE on success
- *  - FALSE on failure
- * 
- */
-BOOLEAN
-writePage(PPFNdata PFNtoWrite);
-
-/*
- * setPFBitIndex: finds a free block in pageFile and sets it to in use (1)
- * 
- * Returns ULONG_PTR
- *  - ULONG_PTR index (in BITS) on success
- *  - MAXULONG_PTR on failure
- */
-ULONG_PTR
-setPFBitIndex();
-
-/*
- * clearPFBitIndex: clears specified bit (so pagefile space can now be reused) 
- * 
- * No return value
- */
-VOID
-clearPFBitIndex(ULONG_PTR pfVA);
