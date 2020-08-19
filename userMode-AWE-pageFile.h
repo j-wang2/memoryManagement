@@ -18,29 +18,33 @@
 
 typedef struct _hardwarePTE{
     ULONG64 validBit: 1;            // valid bit MUST be set for hPTE format
-    // ULONG64 transitionBit: 1;
-    // ULONG64 demandZeroBit: 1;
-    ULONG64 dirtyBit: 1;
     ULONG64 writeBit: 1;            // read if 0, write if 1
+    ULONG64 executeBit: 1;
+    ULONG64 dirtyBit: 1;
     ULONG64 PFN: PFN_BITS;          //  page frame number (PHYSICAL)
 } hardwarePTE, *PhardwarePTE;
 
 typedef struct _transitionPTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for tPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 1 for dzPTE
+    ULONG64 permissions: 3;                    // read if 0, write if 1
     ULONG64 readInProgressBit: 1;
     ULONG64 PFN: PFN_BITS;
 } transitionPTE, *PtransitionPTE;
 
-typedef struct _demandZeroPTE{
+typedef struct _demandZeroPTE{          // TODO: not pfPTE if pagefile index is maxulong
     ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
     ULONG64 demandZeroBit: 1;       // dz bit MUST be 1 for dzPTE
+    ULONG64 permissions: 3;
 } demandZeroPTE, *PdemandZeroPTE;
 
 typedef struct _pageFilePTE{
+    ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
+    ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
+    ULONG64 demandZeroBit: 1;       // dz bit MUST be 0 for pfPTE
+    ULONG64 permissions: 3;
     ULONG64 pageFileIndex: PAGEFILE_BITS;
-    ULONG64 writeBit: 1;                    // read if 0, write if 1
 } pageFilePTE, *PpageFilePTE;
 
 typedef ULONG64 ulongPTE;
@@ -60,7 +64,7 @@ typedef struct _PFNdata {
     ULONG64 statusBits: 5;
     ULONG64 pageFileOffset: PAGEFILE_BITS;
     ULONG64 PTEindex: PTE_INDEX_BITS;
-    ULONG64 refCount: 5;                    // TODO - how many bits for refcount"?
+    ULONG64 refCount: 16;          
 } PFNdata, *PPFNdata;
 
 typedef struct _listData {
@@ -69,12 +73,21 @@ typedef struct _listData {
 } listData, *PlistData;
 
 typedef enum {
-    ZERO,
-    FREE,               // 0
-    STANDBY,            // 1
-    MODIFIED,           // 2
-    ACTIVE,             // 3
+    ZERO,               // 0
+    FREE,               // 1
+    STANDBY,            // 2
+    MODIFIED,           // 3
+    ACTIVE,             // 4
 } PFNstatus;
+
+typedef enum {
+    NO_ACCESS,
+    READ_ONLY,
+    READ_WRITE,
+    READ_EXECUTE,
+    READ_WRITE_EXECUTE,
+    // given 3 bits, have capacity for up to 3 more
+} PTEpermissions;
 
 typedef enum {
     SUCCESS,            // 0
@@ -107,6 +120,12 @@ extern void* modifiedWriteVA;              // specific VA used for writing out p
 extern void* pageFileFormatVA;             // specific VA used for copying in page contents from pagefile
 extern ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 
+// Execute-Write-Read (bit ordering)
+extern ULONG_PTR permissionMasks[];
+#define readMask (1 << 0)                   // 1
+#define writeMask (1 << 1)                  // 2
+#define executeMask (1 << 2)                // 4
+
 
 // listHeads array
 extern listData listHeads[ACTIVE];
@@ -117,6 +136,26 @@ extern listData listHeads[ACTIVE];
 
 
 #include "enqueue-dequeue.h"
+
+/*
+ * getPTEpermissions: function to convert input PTE's permissions (as separate bits) into a return PTEpermissions (3 consecutive bits)
+ * 
+ * 
+ * 
+ */
+PTEpermissions
+getPTEpermissions(PTE curr);
+
+/*
+ * checkPTEpermissions: function to check current PTE permissions with requested permissions
+ * 
+ * Returns BOOLEAN:
+ *  - TRUE on success
+ *  - FALSE on failure
+ */
+BOOLEAN
+checkPTEpermissions(PTEpermissions currP, PTEpermissions checkP);
+
 
 
 /*
@@ -132,7 +171,7 @@ extern listData listHeads[ACTIVE];
  * 
  */
 faultStatus
-pageFault(void* virtualAddress, readWrite RWpermission);
+pageFault(void* virtualAddress, PTEpermissions RWEpermissions);
 
 
 /*
@@ -167,7 +206,7 @@ getPage();
  *  - ACCESS_VIOLATION on failure
  */
 faultStatus
-accessVA (PVOID virtualAddress, readWrite req);
+accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions);
 
 /*
  * isVAaccessible: function to check access to a VA - DOES NOT pagefault on failure
@@ -177,7 +216,7 @@ accessVA (PVOID virtualAddress, readWrite req);
  *  - ACCESS_VIOLATION on failure (1)
  */
 faultStatus 
-isVAaccessible (PVOID virtualAddress, readWrite req);
+isVAaccessible (PVOID virtualAddress, PTEpermissions RWEpermissions);
 
 /*
  * commitVA: function to commit a VA
@@ -189,7 +228,7 @@ isVAaccessible (PVOID virtualAddress, readWrite req);
  *  - FALSE on failure
  */
 BOOLEAN
-commitVA (PVOID startVA, ULONG_PTR commitSize);
+commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize);
 
 /*TODO - need to adapt for PF format
  * decommitVA: function to decommit a given virtual address
@@ -203,6 +242,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize);
 
 /*
  * trimPage(void* VA): function to trim the entire containing page corresponding to VA param
+ *  - Converts from VALID format PTE to TRANSITION format PTE
  * 
  * Returns BOOLEAN:
  *  - TRUE on success

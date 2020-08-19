@@ -19,6 +19,8 @@ DEL = del /Q		## for windows makefile
 # .PHONY: all clean
 
 all:
+	$(CC) $(SOURCES)
+debug:
 	$(CC) $(CFLAGS) $(SOURCES)
 
 clean:
