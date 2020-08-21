@@ -1,7 +1,7 @@
 #ifndef PAGEFILE_H
 #define PAGEFILE_H
 
-// #include "userMode-AWE-pageFile.h"
+#include "userMode-AWE-pageFile.h"
 
 /*
  * writePage: function to write out a given page (associated w PFN metadata) to pagefile

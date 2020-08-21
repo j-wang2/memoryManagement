@@ -1,3 +1,5 @@
+#include "userMode-AWE-pageFile.h"
+
 
 
 /*

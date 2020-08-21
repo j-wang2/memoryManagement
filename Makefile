@@ -6,6 +6,7 @@
 CURRPROG = userMode-AWE-pageFile
 PROGS = $(CURRPROG).exe
 OBJS = *.obj
+
 SOURCES = $(CURRPROG).c enqueue-dequeue.c pageFile.c
 
 

@@ -1,3 +1,7 @@
+
+#ifndef USERMODE_H
+#define USERMODE_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <tchar.h>
@@ -81,11 +85,11 @@ typedef enum {
 } PFNstatus;
 
 typedef enum {
-    NO_ACCESS,
-    READ_ONLY,
-    READ_WRITE,
-    READ_EXECUTE,
-    READ_WRITE_EXECUTE,
+    NO_ACCESS,          // 0
+    READ_ONLY,          // 1
+    READ_WRITE,         // 2
+    READ_EXECUTE,       // 3
+    READ_WRITE_EXECUTE, // 4
     // given 3 bits, have capacity for up to 3 more
 } PTEpermissions;
 
@@ -302,3 +306,6 @@ zeroPage(ULONG_PTR PFN);
 
 BOOLEAN
 modifiedPageWriter();
+
+
+#endif //USERMODE_H

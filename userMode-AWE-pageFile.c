@@ -28,7 +28,7 @@ void* pageFileFormatVA;             // specific VA used for copying in page cont
 ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 
 // Execute-Write-Read (bit ordering)
-ULONG_PTR permissionMasks[] = { 0, readMask, (readMask & writeMask), (readMask & executeMask), (readMask & writeMask & executeMask)};
+ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask | executeMask), (readMask | writeMask | executeMask)};
 
 listData listHeads[ACTIVE];         // intialization of listHeads array
 
@@ -57,6 +57,38 @@ getPTEpermissions(PTE curr)
     }
 }
 
+
+/*
+ * transferPTEpermissions: function to convert input PTEpermissions into destionation (valid) PTE separate bits
+ * 
+ * 
+ */
+VOID
+transferPTEpermissions(PPTE activeDest, PTEpermissions sourceP)
+{
+    printf("%d\n", activeDest->u1.ulongPTE);
+    printf("%d\n", sourceP);
+
+    if (permissionMasks[sourceP] & writeMask) {
+        activeDest->u1.hPTE.writeBit = 1;
+    } else {
+        activeDest->u1.hPTE.writeBit = 0;
+    }
+    printf("%d\n", activeDest->u1.ulongPTE);
+
+    if (permissionMasks[sourceP] & executeMask) {
+        activeDest->u1.hPTE.executeBit = 1;
+    } else {
+        activeDest->u1.hPTE.executeBit = 0;
+    }
+    printf("%d\n", activeDest->u1.ulongPTE);
+
+    // if (permissionMasks[sourceP] & readMask) {
+
+    // }
+
+}
+
 /*
  * checkPTEpermissions: function to check current PTE permissions with requested permissions
  * 
@@ -68,6 +100,9 @@ BOOLEAN
 checkPTEpermissions(PTEpermissions currP, PTEpermissions checkP) 
 {
 
+    // printf("currP: %d")
+
+    // get mask for permissions to check and logical and it with current mask
     if ( (permissionMasks[checkP] & permissionMasks[currP] ) != permissionMasks[checkP]) {
         return FALSE;
     }
@@ -99,7 +134,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
         // check permissions
         PTEpermissions tempRWEpermissions = getPTEpermissions(tempPTE);
-        if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {                  // TODO1
+        if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {
 
             fprintf(stderr, "Invalid permissions\n");
             return ACCESS_VIOLATION;
@@ -107,7 +142,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         } 
         
         // check for Write permissions - if write, set dirty bit and clear PF
-        else if (permissionMasks[RWEpermissions] & writeMask) {                             // TODO1
+        else if (permissionMasks[RWEpermissions] & writeMask) {
 
             // set PTE to dirty
             tempPTE.u1.hPTE.dirtyBit = 1;
@@ -131,8 +166,11 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     } 
     else if (tempPTE.u1.tPTE.transitionBit == 1) {                       // TRANSITION STATE PTE
 
-        // check permissions
+#define PERMISSIONS
+#ifdef PERMISSIONS
+  // check permissions
         PTEpermissions tempRWEpermissions = tempPTE.u1.tPTE.permissions;
+        
         if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {                  // TODO1
 
             fprintf(stderr, "Invalid permissions\n");
@@ -160,7 +198,51 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
         PPFNdata transitionPFN;
         transitionPFN = PFNarray + pageNum;
+#else
 
+        // TODO: do i NEED TO TRANSFER TRANSITION/PAGEFILE EPRMISSIONS TO VALID
+        PTE transPTE;
+        transPTE.u1.ulongPTE = tempPTE.u1.ulongPTE;
+        tempPTE.u1.ulongPTE = 0;
+        printf("about to check permissions\n");
+        // check permissions
+        PTEpermissions transRWEpermissions = transPTE.u1.tPTE.permissions;
+        if (!checkPTEpermissions(transRWEpermissions, RWEpermissions)) {
+
+            fprintf(stderr, "Invalid permissions\n");
+            return ACCESS_VIOLATION;
+
+        } 
+        else if (permissionMasks[RWEpermissions] & writeMask) {         // if attempting to write, set dirty bit & clear PF location if it exists (TODO DO I NEED TO CHECK IF EXISTS)
+
+            // set PTE to dirty
+            tempPTE.u1.hPTE.dirtyBit = 1;
+
+            // get PFN 
+            PPFNdata PFN;
+            PFN = PFNarray + transPTE.u1.hPTE.PFN;
+
+            // free PF location
+            clearPFBitIndex(PFN->pageFileOffset);
+
+            // clear pagefile pointer out of PFN
+            PFN->pageFileOffset = MAXULONG_PTR;
+
+            * (volatile PTE *) currPTE = tempPTE;
+        }
+        
+        printf("about to ttranfser permissions\n");
+
+        // copy permissions     TODO CHECK
+        transferPTEpermissions(&tempPTE, transRWEpermissions);
+
+        printf("done transferring permissions to PTE %d\n", (INT) tempPTE.u1.ulongPTE);
+        // get PFN from old PTE
+        pageNum = transPTE.u1.tPTE.PFN;
+
+        PPFNdata transitionPFN;
+        transitionPFN = PFNarray + pageNum;
+#endif
         // dequeue from either standby or modified list
         dequeueSpecificPage(transitionPFN);
 
@@ -183,14 +265,14 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
         // check permissions
         PTEpermissions tempRWEpermissions = tempPTE.u1.dzPTE.permissions;
-        if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {                  // TODO1
+        if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {
 
             fprintf(stderr, "Invalid permissions\n");
             return ACCESS_VIOLATION;
 
         } 
         // if write, set dirty bit 
-        else if (permissionMasks[RWEpermissions] & writeMask) {                     // TODO1 permissions
+        else if (permissionMasks[RWEpermissions] & writeMask) {
 
             // set PTE to dirty
             tempPTE.u1.hPTE.dirtyBit = 1;
@@ -225,7 +307,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
     }
     else if (tempPTE.u1.ulongPTE == 0) {                          // ZERO STATE PTE
-
+        // TODO - need to check if vad is mem commit and bring in permissions if so
         fprintf(stderr, "access violation - PTE is zero\n");
         return ACCESS_VIOLATION;
 
@@ -481,7 +563,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
     tempPTE = *currPTE;
 
     // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
-    if (tempPTE.u1.hPTE.validBit == 1 || tempPTE.u1.tPTE.transitionBit == 1 || tempPTE.u1.dzPTE.demandZeroBit == 1) {
+    if (tempPTE.u1.hPTE.validBit == 1 || tempPTE.u1.tPTE.transitionBit == 1 || tempPTE.u1.dzPTE.demandZeroBit == 1 || tempPTE.u1.pfPTE.permissions != NO_ACCESS) {
         printf("PFN is already valid, transition, or demand zero\n");
         return FALSE;
     }
@@ -562,13 +644,23 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
         // enqueue Page to free list
         enqueuePage(&freeListHead, currPFN);
 
-    } 
+    }  else if (tempPTE.u1.pfPTE.pageFileIndex < PAGEFILE_PAGES) {
+        clearPFBitIndex(tempPTE.u1.pfPTE.pageFileIndex);
+        tempPTE.u1.ulongPTE = 0;
+    }
+    else if (tempPTE.u1.ulongPTE == 0) {
+        fprintf(stderr, "already decommitted\n");
+        return TRUE;
+    }
     // else if (tempPTE.u1.dzPTE)
     // TODO: need to handle dzPTE and pfPT
 
     if (totalCommittedPages != 0)  {
         // decrement count of committed pages and zero PTE
         totalCommittedPages--;
+    } else {
+        fprintf(stderr, "error - no committed pages\n");
+        return FALSE;
     }
 
     memset(&tempPTE, 0, sizeof(PTE));
@@ -994,16 +1086,17 @@ main()
     for (int i = 0; i < testNum; i++) {
         faultStatus testStatus;
 
-        // commitVA(testVA, READ, 1);    // can commit (doesnt cause crash)
-        commitVA(testVA, WRITE, 1);    // can commit
+        // commitVA(testVA, READ_EXECUTE, 1);    // can commit (doesnt cause crash)
+        commitVA(testVA, READ_WRITE_EXECUTE, 1);    // can commit
 
         // decommitVA(testVA, 1);
     
         if (i % 2 == 0) {
-            testStatus = accessVA(testVA, WRITE);
+            testStatus = accessVA(testVA, READ_WRITE);
         } else {
-            testStatus = accessVA(testVA, READ);
+            testStatus = accessVA(testVA, READ_ONLY);
         }
+
         printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
     }
@@ -1017,12 +1110,22 @@ main()
     testVA = leafVABlock;
 
     for (int i = 0; i < testNum; i++) {
+
+        // trim the VAs we have just tested (to transition, from active)
         trimPage(testVA);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
+
+        // alternate calling modifiedPageWriter and zeroPageWriter
+        if (i%2 == 0) {
+            // modifiedPageWriter();
+            modifiedPageWriter();
+
+        } else {
+            zeroPageWriter();
+        }
+    
     }
 
-    modifiedPageWriter();
-    zeroPageWriter();
 
 
     printf("--------------------------------\n");
@@ -1031,8 +1134,8 @@ main()
 
     // toggle - can either FAULT or TEST VAs 
     for (int i = 0; i < testNum; i++) {
-        // faultStatus testStatus = isVAaccessible(testVA, WRITE);  // to TEST VAs
-        faultStatus testStatus = pageFault(testVA, READ);      // to FAULT VAs
+        // faultStatus testStatus = isVAaccessible(testVA, READ_WRITE);  // to TEST VAs
+        faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
     
         printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
         testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
