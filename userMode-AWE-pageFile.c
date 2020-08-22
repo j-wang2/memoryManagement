@@ -86,7 +86,6 @@ transferPTEpermissions(PPTE activeDest, PTEpermissions sourceP)
     // if (permissionMasks[sourceP] & readMask) {
 
     // }
-
 }
 
 /*
@@ -166,45 +165,12 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     } 
     else if (tempPTE.u1.tPTE.transitionBit == 1) {                       // TRANSITION STATE PTE
 
-#define PERMISSIONS
-#ifdef PERMISSIONS
-  // check permissions
-        PTEpermissions tempRWEpermissions = tempPTE.u1.tPTE.permissions;
-        
-        if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {                  // TODO1
-
-            fprintf(stderr, "Invalid permissions\n");
-            return ACCESS_VIOLATION;
-
-        } 
-        else if (permissionMasks[RWEpermissions] & writeMask) {                             // TODO1
-
-            // set PTE to dirty
-            tempPTE.u1.hPTE.dirtyBit = 1;
-
-            // get PFN 
-            PPFNdata PFN;
-            PFN = PFNarray + tempPTE.u1.hPTE.PFN;
-
-            // free PF location
-            clearPFBitIndex(PFN->pageFileOffset);
-
-            // clear pagefile pointer out of PFN
-            PFN->pageFileOffset = MAXULONG_PTR;
-
-            * (volatile PTE *) currPTE = tempPTE;
-        }
-        pageNum = tempPTE.u1.hPTE.PFN;
-
-        PPFNdata transitionPFN;
-        transitionPFN = PFNarray + pageNum;
-#else
-
-        // TODO: do i NEED TO TRANSFER TRANSITION/PAGEFILE EPRMISSIONS TO VALID
         PTE transPTE;
         transPTE.u1.ulongPTE = tempPTE.u1.ulongPTE;
+
         tempPTE.u1.ulongPTE = 0;
         printf("about to check permissions\n");
+
         // check permissions
         PTEpermissions transRWEpermissions = transPTE.u1.tPTE.permissions;
         if (!checkPTEpermissions(transRWEpermissions, RWEpermissions)) {
@@ -213,36 +179,30 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
             return ACCESS_VIOLATION;
 
         } 
-        else if (permissionMasks[RWEpermissions] & writeMask) {         // if attempting to write, set dirty bit & clear PF location if it exists (TODO DO I NEED TO CHECK IF EXISTS)
+
+        pageNum = transPTE.u1.hPTE.PFN;
+
+        PPFNdata transitionPFN;
+        transitionPFN = PFNarray + pageNum;
+
+        if (permissionMasks[RWEpermissions] & writeMask) { // if attempting to write, set dirty bit & clear PF location if it exists
 
             // set PTE to dirty
             tempPTE.u1.hPTE.dirtyBit = 1;
 
-            // get PFN 
-            PPFNdata PFN;
-            PFN = PFNarray + transPTE.u1.hPTE.PFN;
-
             // free PF location
-            clearPFBitIndex(PFN->pageFileOffset);
+            clearPFBitIndex(transitionPFN->pageFileOffset);
 
             // clear pagefile pointer out of PFN
-            PFN->pageFileOffset = MAXULONG_PTR;
+            transitionPFN->pageFileOffset = MAXULONG_PTR;
 
-            * (volatile PTE *) currPTE = tempPTE;
         }
-        
-        printf("about to ttranfser permissions\n");
 
-        // copy permissions     TODO CHECK
+        // copy permissions from transition PTE into our soon-to-be-active PTE
         transferPTEpermissions(&tempPTE, transRWEpermissions);
 
         printf("done transferring permissions to PTE %d\n", (INT) tempPTE.u1.ulongPTE);
-        // get PFN from old PTE
-        pageNum = transPTE.u1.tPTE.PFN;
 
-        PPFNdata transitionPFN;
-        transitionPFN = PFNarray + pageNum;
-#endif
         // dequeue from either standby or modified list
         dequeueSpecificPage(transitionPFN);
 
@@ -253,15 +213,104 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         tempPTE.u1.hPTE.validBit = 1;
         tempPTE.u1.tPTE.transitionBit = 0;
 
+
+        // compiler writes out as indivisible store             // TODO UPDATE OTHERS (ORDER OF INDIVISIBLE STORE AND MAPUSER)
+        * (volatile PTE *) currPTE = tempPTE;
+
         // assign VA to point at physical page, mirroring our local PTE change
+        MapUserPhysicalPages(virtualAddress, 1, &pageNum);
+
+        return SUCCESS;
+
+    }
+    else if (tempPTE.u1.pfPTE.pageFileIndex < PAGEFILE_PAGES) {   // PAGEFILE STATE PTE
+        printf("pagefile PF\n");
+
+        // TODO: DO I NEED TO TRANSFER TRANSITION/PAGEFILE PERMISSIONS TO VALID
+        PTE pageFilePTE;                                    // copy of contents from tempPTE (use as "old" reference)
+        pageFilePTE.u1.ulongPTE = tempPTE.u1.ulongPTE;
+
+        tempPTE.u1.ulongPTE = 0;                            // zero PTE to be copied in
+        printf("about to check permissions\n");
+
+        // check permissions
+        PTEpermissions pageFileRWEpermissions = pageFilePTE.u1.tPTE.permissions;
+        if (!checkPTEpermissions(pageFileRWEpermissions, RWEpermissions)) {
+
+            fprintf(stderr, "Invalid permissions\n");
+            return ACCESS_VIOLATION;
+
+        }
+
+        // pull in from pagefile and validate 
+
+        // dequeue a page of memory from freed list
+        PPFNdata freedPFN;
+        freedPFN = getPage();
+        if (freedPFN == NULL) {
+            fprintf(stderr, "failed to successfully dequeue PFN from freed list\n");
+            return NO_FREE_PAGES;
+        }
+        printf("Allocated PFN from zero/free/standby list\n");
+
+        // setting status bits to active
+        freedPFN->statusBits = ACTIVE;
+
+        // get page number of the new page we/re allocating
+        pageNum = freedPFN - PFNarray;
+
+        // map given page to the "zero" VA
+        if (!MapUserPhysicalPages(pageFileFormatVA, 1, &pageNum)) {
+            fprintf(stderr, "error remapping pageFileFormatVA\n");
+            return FALSE;
+        }
+
+        // get PFsourceVA from the pageFileIndex
+        PVOID PFsourceVA;
+        PFsourceVA = (PVOID) ( (ULONG_PTR) pageFileVABlock + (PAGE_SIZE * pageFilePTE.u1.pfPTE.pageFileIndex) );
+        
+        // copy contents from pagefile to our new page (via pageFileFormatVA)
+        memcpy(pageFileFormatVA, PFsourceVA, PAGE_SIZE);
+
+        // unmap pageFileFormatVA from page - PFN is now filled w contents from pagefile
+        if (!MapUserPhysicalPages(pageFileFormatVA, 1, NULL)) {
+            fprintf(stderr, "error copying into page\n");
+            return FALSE;
+        }
+
+        // set hardware PTE to valid
+        tempPTE.u1.hPTE.validBit = 1;
+
+        if (permissionMasks[RWEpermissions] & writeMask) { // if attempting to write, set dirty bit & clear PF location if it exists
+
+            // set PTE to dirty
+            tempPTE.u1.hPTE.dirtyBit = 1;
+
+            // free PF location
+            clearPFBitIndex(pageFilePTE.u1.pfPTE.pageFileIndex);
+
+            // clear pagefile pointer out of PFN
+            freedPFN->pageFileOffset = MAXULONG_PTR;
+
+        }
+
+
+        // transfer permissions bit from pfPTE, if it exists
+        transferPTEpermissions(&tempPTE, pageFileRWEpermissions);
+
+        // put PFN's corresponding pageNum into PTE
+        tempPTE.u1.hPTE.PFN = pageNum;
+        
+        // assign VA to point at physical page, mirroring our local PTE change              TODO CHECK
         MapUserPhysicalPages(virtualAddress, 1, &pageNum);
 
         // compiler writes out as indivisible store
         * (volatile PTE *) currPTE = tempPTE;
+
         return SUCCESS;
 
     }
-    else if (tempPTE.u1.dzPTE.demandZeroBit == 1) {                // DEMAND ZERO STATE PTE    
+    else if (tempPTE.u1.pfPTE.pageFileBit == 1) {                // DEMAND ZERO STATE PTE    
 
         // check permissions
         PTEpermissions tempRWEpermissions = tempPTE.u1.dzPTE.permissions;
@@ -299,10 +348,11 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         // change PTE to validBit;
         tempPTE.u1.hPTE.validBit = 1;
 
-        MapUserPhysicalPages(virtualAddress, 1, &pageNum);
-
         // compiler writes out as indivisible store
         * (volatile PTE *) currPTE = tempPTE;
+
+        MapUserPhysicalPages(virtualAddress, 1, &pageNum);
+
         return SUCCESS;                                             // return value of 2; 
 
     }
@@ -312,83 +362,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         return ACCESS_VIOLATION;
 
     }
-    else if (tempPTE.u1.pfPTE.pageFileIndex < PAGEFILE_PAGES) {   // PAGEFILE STATE PTE
-
-        // check permissions
-        PTEpermissions tempRWEpermissions = tempPTE.u1.pfPTE.permissions;
-        if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {                  // TODO1
-
-            fprintf(stderr, "Invalid permissions\n");
-            return ACCESS_VIOLATION;
-
-        } 
-
-        // pull in from pagefile and validate 
-        // dequeue a page of memory from freed list, setting status bits to active
-        PPFNdata freedPFN;
-        freedPFN = getPage();
-        if (freedPFN == NULL) {
-            fprintf(stderr, "failed to successfully dequeue PFN from freed list\n");
-            return NO_FREE_PAGES;
-        }
-        printf("Allocated PFN from zero/free/standby list\n");
-
-        freedPFN->statusBits = ACTIVE;
-
-        pageNum = freedPFN - PFNarray;
-
-        // map given page to the "zero" VA
-        if (!MapUserPhysicalPages(pageFileFormatVA, 1, &pageNum)) {
-            fprintf(stderr, "error remapping pageFileFormatVA\n");
-            return FALSE;
-        }
-
-        // get PFsourceVA from the pageFileIndex
-        PVOID PFsourceVA;
-        PFsourceVA = (PVOID) ( (ULONG_PTR) pageFileVABlock + (PAGE_SIZE * tempPTE.u1.pfPTE.pageFileIndex) );
-        
-        // copy contents from pagefile to our new page (via pageFileFormatVA)
-        memcpy(pageFileFormatVA, PFsourceVA, PAGE_SIZE);
-
-        // unmap pageFileFormatVA from page - PFN is now filled w contents from pagefile
-        if (!MapUserPhysicalPages(pageFileFormatVA, 1, NULL)) {
-            fprintf(stderr, "error copying into page\n");
-            return FALSE;
-        }
-
-        // validate PTE and pass in new PFN
-        PTE oldPTE;
-        oldPTE.u1.ulongPTE = tempPTE.u1.ulongPTE;
-
-        // zero PTE
-        tempPTE.u1.ulongPTE = 0;
-
-        // set hardware PTE to valid
-        tempPTE.u1.hPTE.validBit = 1;
-
-        // transfer write bit from pfPTE, if it exists
-        if (permissionMasks[oldPTE.u1.pfPTE.permissions] & writeMask) {
-            tempPTE.u1.hPTE.writeBit = 1;
-            
-            // set PTE to dirty if write
-            if (permissionMasks[RWEpermissions] & writeMask) { 
-                tempPTE.u1.hPTE.dirtyBit = 1;
-            }
-        }
-
-        if (permissionMasks[oldPTE.u1.pfPTE.permissions] & executeMask) {
-            tempPTE.u1.hPTE.executeBit = 1;
-        }
-
-        // put PFN's corresponding pageNum into PTE
-        tempPTE.u1.hPTE.PFN = pageNum;
-        
-        // compiler writes out as indivisible store
-        * (volatile PTE *) currPTE = tempPTE;
-
-        return SUCCESS;
-
-    } else {
+    else {
         fprintf(stderr, "ERROR - not in any recognized PTE state\n");
         exit (-1);
     }
@@ -563,7 +537,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
     tempPTE = *currPTE;
 
     // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
-    if (tempPTE.u1.hPTE.validBit == 1 || tempPTE.u1.tPTE.transitionBit == 1 || tempPTE.u1.dzPTE.demandZeroBit == 1 || tempPTE.u1.pfPTE.permissions != NO_ACCESS) {
+    if (tempPTE.u1.hPTE.validBit == 1 || tempPTE.u1.tPTE.transitionBit == 1 || tempPTE.u1.pfPTE.permissions != NO_ACCESS) { // check!! tempPTE.u1.dzPTE.demandZeroBit == 1
         printf("PFN is already valid, transition, or demand zero\n");
         return FALSE;
     }
@@ -573,8 +547,9 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         tempPTE.u1.dzPTE.permissions = RWEpermissions;
 
         // set demand zero bit (commit)
-        tempPTE.u1.dzPTE.demandZeroBit = 1;
+        tempPTE.u1.dzPTE.pageFileBit = 1;
 
+        tempPTE.u1.dzPTE.pageFileIndex = MAXULONG_PTR;
         totalCommittedPages++;
         printf("Committed VA at %d\n", (ULONG) startVA);
     

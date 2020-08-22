@@ -36,20 +36,23 @@ typedef struct _transitionPTE{
     ULONG64 PFN: PFN_BITS;
 } transitionPTE, *PtransitionPTE;
 
-typedef struct _demandZeroPTE{          // TODO: not pfPTE if pagefile index is maxulong
-    ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
-    ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
-    ULONG64 demandZeroBit: 1;       // dz bit MUST be 1 for dzPTE
-    ULONG64 permissions: 3;
-} demandZeroPTE, *PdemandZeroPTE;
-
 typedef struct _pageFilePTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
-    ULONG64 demandZeroBit: 1;       // dz bit MUST be 0 for pfPTE
+    ULONG64 pageFileBit: 1;       // pfbit MUST be 1 for pfPTE
     ULONG64 permissions: 3;
     ULONG64 pageFileIndex: PAGEFILE_BITS;
 } pageFilePTE, *PpageFilePTE;
+
+typedef struct _demandZeroPTE{          // TODO: not pfPTE if pagefile index is maxulong
+    ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
+    ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
+    ULONG64 pageFileBit: 1;       // pf bit is 1 for dzPTE
+    ULONG64 permissions: 3;
+    ULONG64 pageFileIndex: PAGEFILE_BITS;   // PF index MUST be MAX_ULONG for dzPTE
+} demandZeroPTE, *PdemandZeroPTE;
+
+
 
 typedef ULONG64 ulongPTE;
 

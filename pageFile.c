@@ -77,6 +77,9 @@ setPFBitIndex()
 VOID
 clearPFBitIndex(ULONG_PTR pfVA) 
 {
+    if (pfVA == MAXULONG_PTR) {
+        return;
+    }
     ULONG_PTR i;
     ULONG_PTR j;
     ULONG_PTR currFrame;
