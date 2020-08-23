@@ -1,4 +1,7 @@
-#include "userMode-AWE-pageFile.h"
+#ifndef ENQUEUE_DEQUEUE_H
+#define ENQUEUE_DEQUEUE_H
+
+// #include "userMode-AWE-pageFile.h"
 
 
 
@@ -48,3 +51,5 @@ dequeueSpecific(PLIST_ENTRY removeItem);
  */
 VOID
 dequeueSpecificPage(PPFNdata removePage);
+
+#endif

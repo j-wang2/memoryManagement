@@ -1,17 +1,7 @@
 #ifndef PAGEFILE_H
 #define PAGEFILE_H
 
-#include "userMode-AWE-pageFile.h"
-
-/*
- * writePage: function to write out a given page (associated w PFN metadata) to pagefile
- * 
- * Returns BOOLEAN:
- *  - TRUE on success
- *  - FALSE on failure
- */
-BOOLEAN
-writePage(PPFNdata PFNtoWrite);
+// #include "userMode-AWE-pageFile.h"
 
 /*
  * setPFBitIndex: function to set (change from 0 to 1) bit index of pagefile bit array
@@ -19,7 +9,7 @@ writePage(PPFNdata PFNtoWrite);
  * 
  * Returns ULONG_PTR:
  *  - bitIndex on success
- *  - MAXULONG_PTR on failure ( no available space)
+ *  - INVALID_PAGEFILE_INDEX on failure ( no available space)
  */
 ULONG_PTR
 setPFBitIndex();
@@ -33,5 +23,16 @@ setPFBitIndex();
  */
 VOID
 clearPFBitIndex(ULONG_PTR pfVA);
+
+
+/*
+ * writePage: function to write out a given page (associated w PFN metadata) to pagefile
+ * 
+ * Returns BOOLEAN:
+ *  - TRUE on success
+ *  - FALSE on failure
+ */
+BOOLEAN
+writePage(PPFNdata PFNtoWrite);
 
 #endif

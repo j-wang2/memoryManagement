@@ -1,43 +1,6 @@
 #include "userMode-AWE-pageFile.h"
+// #include "pagefile.h"
 
-BOOLEAN
-writePage(PPFNdata PFNtoWrite)
-{
-
-    ULONG_PTR PFN;
-    PFN = PFNtoWrite - PFNarray;
-
-    ULONG_PTR bitIndex;
-    bitIndex = setPFBitIndex();
-    if (bitIndex == MAXULONG_PTR) {
-        fprintf(stderr, "no remaining space in pagefile - could not write out \n");
-        return FALSE;
-    }
-
-    // add/update pageFileOffset field of PFN
-    PFNtoWrite->pageFileOffset = bitIndex;
-
-    // map given page to the modifiedWriteVA
-    if (!MapUserPhysicalPages(modifiedWriteVA, 1, &PFN)) {
-        fprintf(stderr, "error mapping modifiedWriteVA\n");
-        return FALSE;
-    }
-
-    // get location in pagefile from bitindex
-    void* PFLocation;
-    PFLocation = (void*) ( (ULONG_PTR)pageFileVABlock + bitIndex*PAGE_SIZE);
-
-    // copy the contents in the currentPFN out to the pagefile
-    memcpy(PFLocation, modifiedWriteVA, PAGE_SIZE);
-
-    // unmap modifiedWriteVA from page
-    if (!MapUserPhysicalPages(modifiedWriteVA, 1, NULL)) {
-        fprintf(stderr, "error unmapping modifiedWriteVA\n");
-        return FALSE;
-    }
-    printf("successfully wrote page to pagefile\n");
-    return TRUE;
-}
 
 ULONG_PTR
 setPFBitIndex()
@@ -71,13 +34,13 @@ setPFBitIndex()
             currFrame >>= 1;     
         }
     }
-    return MAXULONG_PTR;
+    return INVALID_PAGEFILE_INDEX;
 }
 
 VOID
 clearPFBitIndex(ULONG_PTR pfVA) 
 {
-    if (pfVA == MAXULONG_PTR) {
+    if (pfVA == INVALID_PAGEFILE_INDEX) {
         return;
     }
     ULONG_PTR i;
@@ -92,4 +55,45 @@ clearPFBitIndex(ULONG_PTR pfVA)
 
     pageFileBitArray[i] = currFrame;
 
+}
+
+
+
+BOOLEAN
+writePage(PPFNdata PFNtoWrite)
+{
+
+    ULONG_PTR PFN;
+    PFN = PFNtoWrite - PFNarray;
+
+    ULONG_PTR bitIndex;
+    bitIndex = setPFBitIndex();
+    if (bitIndex == INVALID_PAGEFILE_INDEX) {
+        fprintf(stderr, "no remaining space in pagefile - could not write out \n");
+        return FALSE;
+    }
+
+    // add/update pageFileOffset field of PFN
+    PFNtoWrite->pageFileOffset = bitIndex;
+
+    // map given page to the modifiedWriteVA
+    if (!MapUserPhysicalPages(modifiedWriteVA, 1, &PFN)) {
+        fprintf(stderr, "error mapping modifiedWriteVA\n");
+        return FALSE;
+    }
+
+    // get location in pagefile from bitindex
+    void* PFLocation;
+    PFLocation = (void*) ( (ULONG_PTR)pageFileVABlock + bitIndex*PAGE_SIZE);
+
+    // copy the contents in the currentPFN out to the pagefile
+    memcpy(PFLocation, modifiedWriteVA, PAGE_SIZE);
+
+    // unmap modifiedWriteVA from page
+    if (!MapUserPhysicalPages(modifiedWriteVA, 1, NULL)) {
+        fprintf(stderr, "error unmapping modifiedWriteVA\n");
+        return FALSE;
+    }
+    printf("successfully wrote page to pagefile\n");
+    return TRUE;
 }

@@ -1,6 +1,5 @@
 #include "userMode-AWE-pageFile.h"
 
-
 VOID
 enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem) 
 {

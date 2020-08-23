@@ -12,11 +12,13 @@
 #define NUM_PAGES 512
 #define PTE_INDEX_BITS 9        // log2(NUM_PAGES)
 #define PAGE_SIZE 4096
+#define PAGE_SHIFT 12           // number of bits to multiply/divide by page size
 #define PFN_BITS 40
 
 #define PAGEFILE_PAGES 512
 #define PAGEFILE_SIZE PAGEFILE_PAGES*PAGE_SIZE    // 
 #define PAGEFILE_BITS 20 // actually 2^19 currently
+#define INVALID_PAGEFILE_INDEX 0xfffff // 20 bits (MUST CORRESPOND TO PAGEFILE BITS)
 
 #define ASSERT(x) if((x) == FALSE) DebugBreak()
 
@@ -44,15 +46,13 @@ typedef struct _pageFilePTE{
     ULONG64 pageFileIndex: PAGEFILE_BITS;
 } pageFilePTE, *PpageFilePTE;
 
-typedef struct _demandZeroPTE{          // TODO: not pfPTE if pagefile index is maxulong
+typedef struct _demandZeroPTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
     ULONG64 pageFileBit: 1;       // pf bit is 1 for dzPTE
     ULONG64 permissions: 3;
-    ULONG64 pageFileIndex: PAGEFILE_BITS;   // PF index MUST be MAX_ULONG for dzPTE
+    ULONG64 pageFileIndex: PAGEFILE_BITS;   // PF index MUST be INVALID_PAGEFILE_INDEX( MAXULONG_PTR) for dzPTE
 } demandZeroPTE, *PdemandZeroPTE;
-
-
 
 typedef ULONG64 ulongPTE;
 
@@ -143,27 +143,6 @@ extern listData listHeads[ACTIVE];
 
 
 /*
- * getPTEpermissions: function to convert input PTE's permissions (as separate bits) into a return PTEpermissions (3 consecutive bits)
- * 
- * 
- * 
- */
-PTEpermissions
-getPTEpermissions(PTE curr);
-
-/*
- * checkPTEpermissions: function to check current PTE permissions with requested permissions
- * 
- * Returns BOOLEAN:
- *  - TRUE on success
- *  - FALSE on failure
- */
-BOOLEAN
-checkPTEpermissions(PTEpermissions currP, PTEpermissions checkP);
-
-
-
-/*
  * pageFault: function to simulate and handle a pagefault
  * function
  *  - gets page given a VA
@@ -189,18 +168,6 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions);
 PPTE
 getPTE(void* virtualAddress);
 
-/*
- * TODO - FIX!
- *   - need to add zero list
- * 
- * getPage: function to get a page off zero/free/standby list
- * 
- * Returns PPFNdata
- *  - returnPFN (pfn metadata for the freed page) on success
- *  - NULL on failure (all lists empty)
- */
-PPFNdata
-getPage();
 
 /*
  * accessVA: function to access a VA, given either read or write permissions
