@@ -150,8 +150,6 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         return FALSE;
     }
 
-    // * (volatile ULONG_PTR *) currPTE->u1.ulongPTE = tempPTE.u1.ulongPTE;
-
     * (volatile PTE *) currPTE = tempPTE;
     return TRUE;
 }
@@ -177,7 +175,9 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
     }
 
     // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
-    else if (tempPTE.u1.hPTE.validBit == 1) {
+
+    else if (tempPTE.u1.hPTE.validBit == 1) {                       // valid/hardware format
+
         // get PFN
         PPFNdata currPFN;
         currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
@@ -192,8 +192,9 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
         // enqueue Page to free list
         enqueuePage(&freeListHead, currPFN);
+
     } 
-    else if (tempPTE.u1.tPTE.transitionBit == 1) {
+    else if (tempPTE.u1.tPTE.transitionBit == 1) {                  // transition format
 
         // get PFN
         PPFNdata currPFN;
@@ -212,11 +213,14 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
         enqueuePage(&freeListHead, currPFN);
 
     }  
-    else if (tempPTE.u1.pfPTE.pageFileIndex < PAGEFILE_PAGES) {
+    else if (tempPTE.u1.pfPTE.pageFileIndex < PAGEFILE_PAGES) {     // pagefile format
+
         clearPFBitIndex(tempPTE.u1.pfPTE.pageFileIndex);
         tempPTE.u1.ulongPTE = 0;
+
     }
-    else if (tempPTE.u1.ulongPTE == 0) {
+
+    else if (tempPTE.u1.ulongPTE == 0) {                            // zero PTE
         fprintf(stderr, "already decommitted\n");
         return TRUE;
     }
@@ -224,11 +228,15 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
     // TODO: need to handle dzPTE and pfPT
 
     if (totalCommittedPages != 0)  {
+
         // decrement count of committed pages and zero PTE
         totalCommittedPages--;
+
     } else {
+
         fprintf(stderr, "error - no committed pages\n");
         return FALSE;
+        
     }
 
     memset(&tempPTE, 0, sizeof(PTE));
@@ -251,9 +259,9 @@ trimPage(void* virtualAddress)
         return FALSE;
     }
     
-    PTE PTEtoTrim;
-    PTEtoTrim = *PTEaddress;
-    PTE oldPTE = PTEtoTrim;
+    // take snapshot of old PTE
+    PTE oldPTE;
+    oldPTE = *PTEaddress;
 
     // check if PTE's valid bit is set - if not, can't be trimmed and return failure
     if (oldPTE.u1.hPTE.validBit == 0) {
@@ -261,7 +269,8 @@ trimPage(void* virtualAddress)
         return FALSE;
     }
 
-    // invalidate PTE
+    // zero new PTE
+    PTE PTEtoTrim;
     PTEtoTrim.u1.ulongPTE = 0;
 
     // unmap page from VA (invalidates hardwarePTE)
