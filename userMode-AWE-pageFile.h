@@ -143,22 +143,6 @@ extern listData listHeads[ACTIVE];
 
 
 /*
- * pageFault: function to simulate and handle a pagefault
- * function
- *  - gets page given a VA
- *  - if PTE exists, return SUCCESS (2)?
- *  - otherweise, dequeue from freed list and return pointer to PFN entry 
- * 
- * Returns faultStatus:
- *  - SUCCESS on successful 
- *  - ACCESS_VIOLATION on access violation ( out of bounds/ invalid permissions)
- * 
- */
-faultStatus
-pageFault(void* virtualAddress, PTEpermissions RWEpermissions);
-
-
-/*
  * getPTE: function to find corresponding PTE from a given VA
  * 
  * Returns PPTE
@@ -180,6 +164,7 @@ getPTE(void* virtualAddress);
 faultStatus
 accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions);
 
+
 /*
  * isVAaccessible: function to check access to a VA - DOES NOT pagefault on failure
  * 
@@ -189,6 +174,7 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions);
  */
 faultStatus 
 isVAaccessible (PVOID virtualAddress, PTEpermissions RWEpermissions);
+
 
 /*
  * commitVA: function to commit a VA
@@ -202,6 +188,7 @@ isVAaccessible (PVOID virtualAddress, PTEpermissions RWEpermissions);
 BOOLEAN
 commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize);
 
+
 /*TODO - need to adapt for PF format
  * decommitVA: function to decommit a given virtual address
  * 
@@ -211,6 +198,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize);
  */
 BOOLEAN
 decommitVA (PVOID startVA, ULONG_PTR commitSize);
+
 
 /*
  * trimPage(void* VA): function to trim the entire containing page corresponding to VA param
@@ -222,6 +210,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize);
  */
 BOOLEAN
 trimPage(void* virtualAddress);
+
 
 /*****************************************************************
    LoggedSetLockPagesPrivilege: a function to obtain or
@@ -241,6 +230,7 @@ BOOL
 LoggedSetLockPagesPrivilege ( HANDLE hProcess,
                               BOOL bEnable);
 
+
 /*
  * getPrivilege: wrapper function for getting page mapping privilege
  * 
@@ -250,6 +240,7 @@ LoggedSetLockPagesPrivilege ( HANDLE hProcess,
  */
 BOOLEAN
 getPrivilege ();
+
 
 /*
  * initVABlock: initializes the block of memory to be managed
@@ -262,20 +253,38 @@ getPrivilege ();
 PVOID
 initVABlock(int numPages, int pageSize);
 
+
 PPFNdata
 initPFNarray(PULONG_PTR aPFNs, int numPages, int pageSize);
+
 
 PPTE
 initPTEarray(int numPages, int pageSize);
 
+
 PVOID
 initPageFile(int diskSize);
+
 
 BOOLEAN
 zeroPage(ULONG_PTR PFN);
 
+
+BOOLEAN
+zeroPageWriter();
+
+
 BOOLEAN
 modifiedPageWriter();
+
+
+// might be local
+VOID
+initLinkHead(PLIST_ENTRY headLink);
+
+
+VOID
+initListHead(PlistData headData);
 
 
 #endif //USERMODE_H

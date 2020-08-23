@@ -129,7 +129,7 @@ getPage()
         ULONG_PTR PFN;
         PFN = returnPFN - PFNarray;
 
-        // zeroPage (this also updates the status bits in the PFN metadata)
+        // zeroPage (does not update status bits in PFN metadata)
         zeroPage(PFN);
 
         // set PF offset to our "null" value in the PFN metadata
@@ -146,7 +146,7 @@ getPage()
         ULONG_PTR PFN;
         PFN = returnPFN - PFNarray;
 
-        // zeroPage (this also updates the status bits in the PFN metadata)
+        // zeroPage (does not update status bits in PFN metadata)
         zeroPage(PFN);
 
         // set PF offset to our "null" value in the PFN metadata
