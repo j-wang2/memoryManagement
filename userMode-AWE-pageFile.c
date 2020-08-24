@@ -715,22 +715,28 @@ main()
 
     printf("--------------------------------\n");
 
-    testVA = leafVABlock;
+    // testVA = leafVABlock;
 
-    // toggle - can either FAULT or TEST VAs 
-    for (int i = 0; i < testNum; i++) {
-        faultStatus testStatus = pageFault(testVA, READ_WRITE);  // to TEST VAs
-        // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
+    // // toggle - can either FAULT or TEST VAs 
+    // for (int i = 0; i < testNum; i++) {
+    //     faultStatus testStatus = pageFault(testVA, READ_WRITE);  // to TEST VAs
+    //     // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
     
-        printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
-        testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
-    }
+    //     printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
+    //     testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
+    // }
 
     testVA = leafVABlock;
 
     for (int i = 0; i < testNum; i++) {
         trimPage(testVA);
-        // getPage();
+
+        // to test PF fault
+        // for (int j = 0; j<3; j++) {
+        //     getPage();
+        // }
+
+
         faultStatus testStatus = pageFault(testVA, READ_WRITE);  // to TEST VAs
         // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
         printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);

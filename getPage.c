@@ -47,12 +47,16 @@ getFreePage()
 
 
 PPFNdata 
-getStandbyPage()
+getStandbyPage()                    // TODO MAKE SURE THAT PULLS FROM HEAD/TAIL
 {
+
     PPFNdata returnPFN;
+
     if (standbyListHead.count != 0) {
 
+        // dequeue a page from standby list
         returnPFN = dequeuePage(&standbyListHead);
+
         if (returnPFN == NULL) {
             fprintf(stderr, "Error in getPage(): unable to pull page off standby\n");
             return NULL;
@@ -66,12 +70,13 @@ getStandbyPage()
         PTE oldPTE;
         oldPTE = *currPTE;
 
-        //  create newPTE that is zeroed
+        //  create newPTE initialized to zero (blank slate)
         PTE newPTE;
         newPTE.u1.ulongPTE = 0;
 
+        // TODO: 
         // if page is not already in pagefile, it MUST be a zero page (i.e. faulted into active but never written, then trimmed to standby)
-        // Therefore, the PTE can be set to demand zero TODO
+        // Therefore, the PTE can be set to demand zero 
         if (returnPFN->pageFileOffset == INVALID_PAGEFILE_INDEX) {
             BOOLEAN bResult;
             bResult = writePage(returnPFN);
@@ -110,23 +115,6 @@ getPage()
 
     PPFNdata returnPFN;
 
-    // standby list
-    returnPFN = getStandbyPage();
-    if (returnPFN != NULL) {
-        ULONG_PTR PFN;
-        PFN = returnPFN - PFNarray;
-
-        // zeroPage (does not update status bits in PFN metadata)
-        zeroPage(PFN);
-
-        // set PF offset to our "null" value in the PFN metadata
-        returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
-
-        printf("Allocated PFN from standby list\n");
-
-        return returnPFN;   
-    }
-
 
     // Zero list
     returnPFN = getZeroPage();
@@ -157,6 +145,24 @@ getPage()
         printf("Allocated PFN from free list\n");
 
         return returnPFN;
+    }
+
+
+    // standby list
+    returnPFN = getStandbyPage();
+    if (returnPFN != NULL) {
+        ULONG_PTR PFN;
+        PFN = returnPFN - PFNarray;
+
+        // zeroPage (does not update status bits in PFN metadata)
+        zeroPage(PFN);
+
+        // set PF offset to our "null" value in the PFN metadata
+        returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+
+        printf("Allocated PFN from standby list\n");
+
+        return returnPFN;   
     }
 
 

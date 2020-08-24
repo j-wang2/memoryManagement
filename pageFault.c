@@ -125,7 +125,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
 
     // check permissions
-    PTEpermissions pageFileRWEpermissions = snapPTE.u1.tPTE.permissions;
+    PTEpermissions pageFileRWEpermissions = snapPTE.u1.pfPTE.permissions;
     if (!checkPTEpermissions(pageFileRWEpermissions, RWEpermissions)) {
 
         fprintf(stderr, "Invalid permissions\n");
