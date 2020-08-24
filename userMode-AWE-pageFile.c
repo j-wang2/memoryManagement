@@ -113,6 +113,7 @@ isVAaccessible (PVOID virtualAddress, PTEpermissions RWEpermissions)
 BOOLEAN
 commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 {
+
     // get the PTE from the VA
     PPTE currPTE;
     currPTE = getPTE(startVA);
@@ -142,7 +143,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
         tempPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
         totalCommittedPages++;
-        printf("Committed VA at %d\n", (ULONG) startVA);
+        printf("Committed VA at %d with permissions %d\n", (ULONG) startVA, RWEpermissions);
     
     } else {
         // no remaining pages
@@ -236,7 +237,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
         fprintf(stderr, "error - no committed pages\n");
         return FALSE;
-        
+
     }
 
     memset(&tempPTE, 0, sizeof(PTE));
@@ -454,14 +455,7 @@ initPFNarray(PULONG_PTR aPFNs, int numPages, int pageSize)
     for (int i = 0; i < numPages; i++) {
 
         PPFNdata currPFN = PFNarray + aPFNs[i];
-        if (i % 3 == 0) {
-            enqueuePage(&zeroListHead, currPFN);
-
-        } else if ( i % 3 == 1) {
-            enqueuePage(&freeListHead, currPFN);
-        } else if (i % 3 == 2) {
-            enqueuePage(&standbyListHead, currPFN);
-        }
+        enqueuePage(&freeListHead, currPFN);        
     }
 
     return PFNarray;
@@ -526,7 +520,7 @@ zeroPageWriter()
     PFNtoZero = dequeuePage(&freeListHead);
 
     if (PFNtoZero == NULL) {
-        fprintf(stderr, "zero list empty - could not write out\n");
+        fprintf(stderr, "free list empty - could not write out\n");
         return FALSE;
     }
 
@@ -539,7 +533,7 @@ zeroPageWriter()
 
     // enqueue to zeroList (updates status bits in PFN metadata)
     enqueuePage(&zeroListHead, PFNtoZero);
-    printf("Moved page from free -> zero \n");
+    printf(" - Moved page from free -> zero \n");
 
     return TRUE;
 }
@@ -585,7 +579,7 @@ modifiedPageWriter()
     // enqueue page to standby
     enqueuePage(&standbyListHead, PFNtoWrite);
 
-    printf("Moved page from modified -> standby (wrote out to PageFile successfully)\n");
+    printf(" - Moved page from modified -> standby (wrote out to PageFile successfully)\n");
 
     return TRUE;   
 
@@ -709,10 +703,8 @@ main()
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
 
         // alternate calling modifiedPageWriter and zeroPageWriter
-        if (i%2 == 0) {
-            // modifiedPageWriter();
+        if (i % 2 == 0) {
             modifiedPageWriter();
-
         } else {
             zeroPageWriter();
         }
@@ -733,6 +725,18 @@ main()
         printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
         testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
     }
+
+    testVA = leafVABlock;
+
+    for (int i = 0; i < testNum; i++) {
+        trimPage(testVA);
+        // getPage();
+        faultStatus testStatus = pageFault(testVA, READ_WRITE);  // to TEST VAs
+        // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
+        printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
+        testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
+    }
+
     printf("program complete\n");
 
     //  free memory allocated

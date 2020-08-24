@@ -99,7 +99,6 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
     // set PTE valid bit to 1
     newPTE.u1.hPTE.validBit = 1;
-    newPTE.u1.tPTE.transitionBit = 0;
 
     // compiler writes out as indivisible store             // TODO UPDATE OTHERS (ORDER OF INDIVISIBLE STORE AND MAPUSER)
     * (volatile PTE *) masterPTE = newPTE;

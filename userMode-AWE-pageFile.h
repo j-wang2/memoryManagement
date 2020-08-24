@@ -62,7 +62,7 @@ typedef struct _PTE{
         transitionPTE tPTE;
         pageFilePTE pfPTE;
         demandZeroPTE dzPTE;
-        ULONG_PTR ulongPTE;
+        ULONG64 ulongPTE;
      } u1;
 } PTE, *PPTE;
 
