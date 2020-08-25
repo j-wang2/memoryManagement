@@ -156,6 +156,7 @@ getPTE(void* virtualAddress);
 /*
  * accessVA: function to access a VA, given either read or write permissions
  *  - pagefaults if not already valid
+ *  - checks read/write permissions, but not execute
  * 
  * Returns faultStatus value
  *  - SUCCESS on success

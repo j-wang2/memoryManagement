@@ -74,17 +74,26 @@ getStandbyPage()                    // TODO MAKE SURE THAT PULLS FROM HEAD/TAIL
         PTE newPTE;
         newPTE.u1.ulongPTE = 0;
 
-        // TODO: 
         // if page is not already in pagefile, it MUST be a zero page (i.e. faulted into active but never written, then trimmed to standby)
         // Therefore, the PTE can be set to demand zero 
         if (returnPFN->pageFileOffset == INVALID_PAGEFILE_INDEX) {
-            BOOLEAN bResult;
-            bResult = writePage(returnPFN);
 
-            if (bResult != TRUE) {
-                fprintf(stderr, "error writing out page\n");
-                return NULL;
-            }
+            // copy permissions to dz format PTE
+            newPTE.u1.dzPTE.permissions = oldPTE.u1.tPTE.permissions;
+
+            // put PF index into dz format PTE
+            newPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
+
+            // set pagefile bit
+            newPTE.u1.pfPTE.pageFileBit = 1;
+
+            returnPFN->statusBits = FREE;
+
+            // copy newPTE back into currPTE
+            * (volatile PTE *) currPTE = newPTE;
+        
+            return returnPFN;
+
         }
 
         // copy permissions to pf format PTE
@@ -114,6 +123,26 @@ getPage()
 {
 
     PPFNdata returnPFN;
+
+#define CHECK_PAGEFILE
+#ifdef CHECK_PAGEFILE
+    // standby list
+    returnPFN = getStandbyPage();
+    if (returnPFN != NULL) {
+        ULONG_PTR PFN;
+        PFN = returnPFN - PFNarray;
+
+        // zeroPage (does not update status bits in PFN metadata)
+        zeroPage(PFN);
+
+        // set PF offset to our "null" value in the PFN metadata
+        returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+
+        printf("Allocated PFN from standby list\n");
+
+        return returnPFN;   
+    }
+#endif
 
 
     // Zero list

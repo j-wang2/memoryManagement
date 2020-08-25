@@ -100,7 +100,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     // set PTE valid bit to 1
     newPTE.u1.hPTE.validBit = 1;
 
-    // compiler writes out as indivisible store             // TODO UPDATE OTHERS (ORDER OF INDIVISIBLE STORE AND MAPUSER)
+    // compiler writes out as indivisible store
     * (volatile PTE *) masterPTE = newPTE;
 
     // assign VA to point at physical page, mirroring our local PTE change
@@ -196,11 +196,11 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // put PFN's corresponding pageNum into PTE
     newPTE.u1.hPTE.PFN = pageNum;
     
-    // assign VA to point at physical page, mirroring our local PTE change              TODO CHECK
-    MapUserPhysicalPages(virtualAddress, 1, &pageNum);
-
     // compiler writes out as indivisible store
     * (volatile PTE *) masterPTE = newPTE;
+
+    // assign VA to point at physical page, mirroring our local PTE change 
+    MapUserPhysicalPages(virtualAddress, 1, &pageNum);
 
     return SUCCESS;
 
@@ -264,6 +264,7 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     // compiler writes out as indivisible store
     * (volatile PTE *) masterPTE = newPTE;
 
+    // assign VA to point at physical page, mirroring our local PTE change
     MapUserPhysicalPages(virtualAddress, 1, &pageNum);
 
     return SUCCESS;                                             // return value of 2; 
@@ -299,7 +300,6 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     } 
     else if (oldPTE.u1.tPTE.transitionBit == 1) {                       // TRANSITION STATE PTE
 
-        // todo - set equal to a fault status that is returned
         status = transPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
         return status;
 
@@ -317,6 +317,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
     }
     else if (oldPTE.u1.ulongPTE == 0) {                          // ZERO STATE PTE
+
         // TODO - need to check if vad is mem commit and bring in permissions if so
         fprintf(stderr, "access violation - PTE is zero\n");
         return ACCESS_VIOLATION;

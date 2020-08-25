@@ -66,24 +66,36 @@ getPTE(void* virtualAddress)
 faultStatus 
 accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions) 
 {
+    // initialize PFstatus to success - only changes on pagefault return val
     faultStatus PFstatus;
     PFstatus = SUCCESS;
-    while (PFstatus == SUCCESS) {
-        _try {
-            if (RWEpermissions == READ_ONLY || READ_EXECUTE) {     // TODO1
-                *(volatile CHAR *)virtualAddress; // read
 
-            } else if (RWEpermissions == READ_WRITE || READ_WRITE_EXECUTE) {       //TODO1
-                *(volatile CHAR *)virtualAddress = *(volatile CHAR *)virtualAddress; // write
+    while (PFstatus == SUCCESS) {
+
+        _try {
+
+            if (RWEpermissions == READ_ONLY || READ_EXECUTE) {
+
+                *(volatile CHAR *)virtualAddress;                                       // read
+
+            } else if (RWEpermissions == READ_WRITE || READ_WRITE_EXECUTE) {
+
+                *(volatile CHAR *)virtualAddress = *(volatile CHAR *)virtualAddress;    // write
 
             } else {
-                fprintf(stderr, "invalid permissions\n");
+
+                fprintf(stderr, "invalid permissions\n");    
+
             }
+
             break;
+
         } _except (EXCEPTION_EXECUTE_HANDLER) {
+
             PFstatus = pageFault(virtualAddress, RWEpermissions);
-            // pageFault(virtualAddress, WRITE);
+
         }
+
     }
 
     return PFstatus;
@@ -666,7 +678,9 @@ main()
 
 
     printf("--------------------------------\n");
-    // FAULTING in testVAs
+
+
+    /************* FAULTING in testVAs *****************/
 
     ULONG_PTR testNum = 10;
     printf("Committing and then faulting in %d pages\n", testNum);
@@ -691,7 +705,8 @@ main()
 
     printf("--------------------------------\n");
 
-    // TRIMMING tested VAs (active -> standby/modified)
+
+    /************ TRIMMING tested VAs (active -> standby/modified) **************/
 
     // reset testVa
     testVA = leafVABlock;
@@ -719,7 +734,7 @@ main()
 
     // // toggle - can either FAULT or TEST VAs 
     // for (int i = 0; i < testNum; i++) {
-    //     faultStatus testStatus = pageFault(testVA, READ_WRITE);  // to TEST VAs
+    //     faultStatus testStatus = accessVA(testVA, READ_WRITE);  // to TEST VAs
     //     // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
     
     //     printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
@@ -731,15 +746,28 @@ main()
     for (int i = 0; i < testNum; i++) {
         trimPage(testVA);
 
-        // to test PF fault
-        // for (int j = 0; j<3; j++) {
-        //     getPage();
-        // }
-
+#define CHECK_PAGEFILE
+#ifdef CHECK_PAGEFILE
+        // to test PF fault - switch order in getPage and add this
+        for (int j = 0; j<3; j++) {
+            getPage();
+        }
+#endif
 
         faultStatus testStatus = pageFault(testVA, READ_WRITE);  // to TEST VAs
         // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
         printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
+        testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
+    }
+
+    /***************** DECOMMITTING VAs **************/
+
+    testVA = leafVABlock;
+
+    for (int i = 0; i < testNum; i++) {
+        decommitVA(testVA, 1);
+        printf("decommitted (VA = %d)\n", (ULONG) testVA);
+
         testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
     }
 
@@ -751,12 +779,3 @@ main()
     VirtualFree(PTEarray, 0, MEM_RELEASE);
 
 }
-
-
-/*
- *
- * detecting pagefileFormat: if valid = 0 and transition = 0
- * - subset of pageFile format is demand zero
- * 
- * we currently have valid, transition, "demand zero"
- */

@@ -28,7 +28,8 @@ getFreePage();
 
 /*
  * getStandbyPage: function to get a page off standby list
- *  - writes out page to pageFile, updates PTE, and zeroes page before returning
+ *  - updates PTE to pfPTE format, and zeroes page before returning
+ *  - DOES NOT write out (since pulling off standby list, is either already in PF or zero)
  *  - called by getPage
  * 
  * Returns PPFNdata
