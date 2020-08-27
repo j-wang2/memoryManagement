@@ -69,13 +69,13 @@ getPTE(void* virtualAddress)
 BOOLEAN
 trimPage(void* virtualAddress)
 {
-    printf("trimming page with VA %d\n", (ULONG) virtualAddress);
+    printf("trimming page with VA %u\n", (ULONG) virtualAddress);
 
     PPTE PTEaddress;
     PTEaddress = getPTE(virtualAddress);
 
     if (PTEaddress == NULL) {
-        fprintf(stderr, "could not trim VA %d - no PTE associated with address\n", (ULONG) virtualAddress);
+        fprintf(stderr, "could not trim VA %u - no PTE associated with address\n", (ULONG) virtualAddress);
         return FALSE;
     }
     
@@ -85,7 +85,7 @@ trimPage(void* virtualAddress)
 
     // check if PTE's valid bit is set - if not, can't be trimmed and return failure
     if (oldPTE.u1.hPTE.validBit == 0) {
-        fprintf(stderr, "could not trim VA %d - PTE is not valid\n", (ULONG) virtualAddress);
+        fprintf(stderr, "could not trim VA %u - PTE is not valid\n", (ULONG) virtualAddress);
         return FALSE;
     }
 
@@ -481,22 +481,25 @@ main()
     for (int i = 0; i < testNum; i++) {
         faultStatus testStatus;
 
-        // commitVA(testVA, READ_ONLY, 1);    // commits with READ_ONLY permissions
-        // protectVA(testVA, READ_WRITE_EXECUTE, 1);
-        commitVA(testVA, READ_WRITE_EXECUTE, 1);    // commits with RWE permissions
+        commitVA(testVA, READ_ONLY, 1);    // commits with READ_ONLY permissions
+        protectVA(testVA, READ_WRITE, 1);
 
-        // decommitVA(testVA, 1);
+        // commitVA(testVA, READ_WRITE, 1);    // commits with read/write permissions (VirtualProtect does not allow execute permissions)
     
         if (i % 2 == 1) {
-            testStatus = accessVA(testVA, READ_WRITE);
+
+            // write VA to the VA location (should remain same throughout entire course of program despite physical page changes)
+            testStatus = writeVA(testVA, testVA);
+
         } else {
+
             testStatus = accessVA(testVA, READ_ONLY);
+            
         }
 
-        * (PVOID *) testVA = testVA;                    // write 8 bytes
-
-        printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
+        printf("tested (VA = %x), return status = %u\n", (ULONG) testVA, testStatus);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
+
     }
 
 
@@ -516,13 +519,16 @@ main()
 
         // alternate calling modifiedPageWriter and zeroPageWriter
         if (i % 2 == 0) {
+
             modifiedPageWriter();
+
         } else {
+
             zeroPageWriter();
+
         }
     
     }
-
 
 
     printf("--------------------------------\n");
@@ -534,14 +540,14 @@ main()
     //     faultStatus testStatus = accessVA(testVA, READ_WRITE);  // to TEST VAs
     //     // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
     
-    //     printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
+    //     printf("tested (VA = %d), return status = %u\n", (ULONG) testVA, testStatus);
     //     testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
     // }
 
     testVA = leafVABlock;
 
     for (int i = 0; i < testNum; i++) {
-        trimPage(testVA);
+        // trimPage(testVA);
 
 #define CHECK_PAGEFILE
 #ifdef CHECK_PAGEFILE
@@ -553,17 +559,20 @@ main()
 
         faultStatus testStatus = pageFault(testVA, READ_WRITE);  // to TEST VAs
         // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
-        printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
+        printf("tested (VA = %x), return status = %u\n", (ULONG) testVA, testStatus);
         testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
     }
 
-    /***************** DECOMMITTING VAs **************/
+    /***************** DECOMMITTING AND CHECKING VAs **************/
 
     testVA = leafVABlock;
 
     for (int i = 0; i < testNum; i++) {
+
+        printf("decommiting (VA = %x) with contents %x\n", (ULONG) testVA, * (ULONG *) testVA);
+        printf("decommiting (VA = %x) with contents %s\n", (ULONG) testVA, * (PCHAR *) testVA);
+
         decommitVA(testVA, 1);
-        printf("decommitted (VA = %d)\n", (ULONG) testVA);
 
         testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
     }

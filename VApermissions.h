@@ -17,6 +17,19 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions);
 
 
 /*
+ * writeVA: function to write to a VA, given PVOID data type
+ *  - calls accessVA and if successful, write to VA
+ * 
+ * Returns faultSTatus value
+ *  - SUCCESS on successful acces & write
+ *  - ACCESS_VIOLATION/NO_FREE_PAGES on failure
+ * 
+ */
+faultStatus
+writeVA(PVOID virtualAddress, PVOID str);
+
+
+/*
  * isVAaccessible: function to check access to a VA - DOES NOT pagefault on failure
  * 
  * Returns faultStatus value

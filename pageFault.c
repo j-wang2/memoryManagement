@@ -285,14 +285,18 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
     // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a lack of permissions protection
 
-    // assign VA to point at physical page, mirroring our local PTE change
-    MapUserPhysicalPages(virtualAddress, 1, &pageNum);
-
     BOOLEAN bresult;
+
+    // assign VA to point at physical page, mirroring our local PTE change
+    bresult = MapUserPhysicalPages(virtualAddress, 1, &pageNum);
+    if (bresult != TRUE) {
+        fprintf(stderr, "[dz PageFault] Error mapping user physical pages\n");
+    }
+
     // update physical permissions of hardware PTE to match our software reference.
     bresult = VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[dZeroRWEpermissions], &oldPermissions);
     if (bresult != TRUE) {
-        fprintf(stderr, "error\n");
+        fprintf(stderr, "[dz PageFault] Error virtual protecting VA with permissions %u\n", dZeroRWEpermissions);
     }
 
     return SUCCESS;                                             // return value of 2; 

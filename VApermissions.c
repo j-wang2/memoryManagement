@@ -36,6 +36,24 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
     }
 
     return PFstatus;
+
+}
+
+faultStatus
+writeVA(PVOID virtualAddress, PVOID str) 
+{
+    faultStatus PFstatus;
+    PFstatus = accessVA(virtualAddress, READ_WRITE);
+
+    // if accessing VA is successful, write parameter str to the VA
+    if (PFstatus == SUCCESS) {
+
+        * (PVOID *) virtualAddress = str;
+        
+    }
+
+    return PFstatus;
+    
 }
 
 
