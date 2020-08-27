@@ -120,7 +120,10 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
 }
 
-
+/*
+ * TODO (future): move to standby before active (read in progress)
+ * 
+ */
 faultStatus
 pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 {
@@ -227,6 +230,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 faultStatus
 demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 {
+
     printf(" - dz page fault\n");
 
     // declare pageNum (PFN) ULONG
@@ -324,7 +328,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     oldPTE = *currPTE;
 
     faultStatus status;
-    if (oldPTE.u1.hPTE.validBit == 1) {                                // VALID STATE PTE
+    if (oldPTE.u1.hPTE.validBit == 1) {                                 // VALID STATE PTE
 
         status = validPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
         return status;
@@ -336,21 +340,21 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         return status;
 
     }
-    else if (oldPTE.u1.pfPTE.pageFileIndex < PAGEFILE_PAGES) {   // PAGEFILE STATE PTE
+    else if (oldPTE.u1.pfPTE.pageFileIndex < PAGEFILE_PAGES) {          // PAGEFILE STATE PTE
 
         status = pageFilePageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);  
         return status;
 
     }
-    else if (oldPTE.u1.pfPTE.pageFileBit == 1) {                // DEMAND ZERO STATE PTE  
+    else if (oldPTE.u1.pfPTE.pageFileBit == 1) {                        // DEMAND ZERO STATE PTE  
 
         status = demandZeroPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
         return status;
 
     }
-    else if (oldPTE.u1.ulongPTE == 0) {                          // ZERO STATE PTE
+    else if (oldPTE.u1.ulongPTE == 0) {                                 // ZERO STATE PTE
 
-        // TODO - need to check if vad is mem commit and bring in permissions if so
+        // TODO (future): may need to check if vad is mem commit and bring in permissions
         fprintf(stderr, "access violation - PTE is zero\n");
         return ACCESS_VIOLATION;
 

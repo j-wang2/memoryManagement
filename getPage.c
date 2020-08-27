@@ -15,7 +15,6 @@ getZeroPage()
             return NULL;
         }
 
-        returnPFN->statusBits = ZERO;                           // TODO - not sure if this or line below is necessary
         returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
         return returnPFN;        
@@ -47,7 +46,7 @@ getFreePage()
 
 
 PPFNdata 
-getStandbyPage()                    // TODO MAKE SURE THAT PULLS FROM HEAD/TAIL
+getStandbyPage()
 {
 
     PPFNdata returnPFN;
@@ -55,7 +54,7 @@ getStandbyPage()                    // TODO MAKE SURE THAT PULLS FROM HEAD/TAIL
     if (standbyListHead.count != 0) {
 
         // dequeue a page from standby list
-        returnPFN = dequeuePage(&standbyListHead);
+        returnPFN = dequeuePageFromTail(&standbyListHead);
 
         if (returnPFN == NULL) {
             fprintf(stderr, "Error in getPage(): unable to pull page off standby\n");
@@ -64,7 +63,7 @@ getStandbyPage()                    // TODO MAKE SURE THAT PULLS FROM HEAD/TAIL
 
         // get PTE
         PPTE currPTE;
-        currPTE = PTEarray + returnPFN->PTEindex;       // TODO: possible compatibility issues with multiple processes (ALSO NEED TO IMPLEMENT ON TRIMPAGE)
+        currPTE = PTEarray + returnPFN->PTEindex;       // TODO: possible multithreading compatibility issues
 
         // create copy of the currPTE to reference
         PTE oldPTE;

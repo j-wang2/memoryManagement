@@ -35,7 +35,6 @@ ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask | executeMask), (readMask | writeMask | executeMask) };
 
 
-
 listData listHeads[ACTIVE];         // intialization of listHeads array
 
 
@@ -221,7 +220,6 @@ initVABlock(int numPages, int pageSize)
     // initialize block of "memory" for use by program
     void* leafVABlock;
 
-    // leafVABlock = VirtualAlloc(NULL, NUM_PAGES*PAGE_SIZE, MEM_COMMIT, PAGE_READWRITE);
     // creates a VAD node that we can define
     leafVABlock = VirtualAlloc(NULL, NUM_PAGES*PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
 
@@ -407,8 +405,7 @@ initListHead(PlistData headData)
     headData->count = 0;
 }
 
-
-// 
+ 
 VOID 
 main() 
 {
@@ -433,6 +430,7 @@ main()
     // allocate an array of PFNs that are returned by AllocateUserPhysPages
     ULONG_PTR *aPFNs;
     aPFNs = VirtualAlloc(NULL, NUM_PAGES*(sizeof(ULONG_PTR)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    
     if (aPFNs == NULL) {
         fprintf(stderr, "failed to allocate PFNarray\n");
     }
@@ -552,7 +550,7 @@ main()
 #define CHECK_PAGEFILE
 #ifdef CHECK_PAGEFILE
         // to test PF fault - switch order in getPage and add this
-        for (int j = 0; j<3; j++) {
+        for (int j = 0; j < 3; j++) {
             getPage();
         }
 #endif
@@ -577,11 +575,12 @@ main()
         testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
     }
 
-    printf("program complete\n");
+    printf("----------------\nprogram complete\n----------------");
 
     //  free memory allocated
     VirtualFree(leafVABlock, 0, MEM_RELEASE);
     VirtualFree(PFNarray, 0, MEM_RELEASE);
     VirtualFree(PTEarray, 0, MEM_RELEASE);
+
 
 }

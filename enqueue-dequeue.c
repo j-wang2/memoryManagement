@@ -27,6 +27,7 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
     PFN->statusBits = listHead - listHeads;
 }
 
+
 PPFNdata
 dequeuePage(PlistData listHead) 
 {
@@ -66,6 +67,47 @@ dequeuePage(PlistData listHead)
     return returnPFN;
 }
 
+
+PPFNdata
+dequeuePageFromTail(PlistData listHead)
+{
+
+    PLIST_ENTRY headLink;
+    headLink = &(listHead->head);
+
+    // verify list has items chained to the head
+    if (headLink->Flink == headLink) {
+        ASSERT(listHead->count == 0);
+
+        fprintf(stderr, "empty list\n");
+        return NULL;
+    }
+
+    ASSERT(listHead->count != 0);
+
+    PPFNdata returnPFN;
+    PLIST_ENTRY returnLink;
+    PLIST_ENTRY newLast;
+    returnLink = headLink->Blink;
+    newLast = returnLink->Blink;
+
+    // set headLink's flink to the return item's flink
+    headLink->Blink = newLast;
+    newLast->Flink = headLink;
+
+    // set returnLink's flink/blink to null before returning it
+    returnLink->Flink = NULL;
+    returnLink->Blink = NULL;
+
+    // decrement count
+    listHead->count--;
+
+    returnPFN = CONTAINING_RECORD(returnLink, PFNdata, links);
+
+    return returnPFN;
+}
+
+
 VOID
 dequeueSpecific(PLIST_ENTRY removeItem)
 {
@@ -82,6 +124,7 @@ dequeueSpecific(PLIST_ENTRY removeItem)
     removeItem->Blink = NULL;
     return;
 }
+
 
 VOID
 dequeueSpecificPage(PPFNdata removePage)

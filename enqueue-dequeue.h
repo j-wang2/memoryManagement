@@ -33,6 +33,19 @@ enqueuePage(PlistData listHead, PPFNdata PFN);
 PPFNdata
 dequeuePage(PlistData listHead);
 
+
+/*
+ * dequeuePageFromTail: function to dequeue an item from the tail of a specified list
+ *  - same as dequeuePage, but just removes from the tail
+ * 
+ * Returns PLIST_ENTRY
+ *  - PLIST_ENTRY returnItem on success
+ *  - NULL on failure (empty list)
+ */
+PPFNdata
+dequeuePageFromTail(PlistData listHead);
+
+
 /*
  * dequeueSpecific: function to remove a specific item regardless of what list it is on
  *  - unlinks specified item from its flink and blink values

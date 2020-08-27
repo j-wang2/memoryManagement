@@ -3,6 +3,7 @@
 faultStatus 
 accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions) 
 {
+
     // initialize PFstatus to success - only changes on pagefault return val
     faultStatus PFstatus;
     PFstatus = SUCCESS;
@@ -38,6 +39,7 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
     return PFstatus;
 
 }
+
 
 faultStatus
 writeVA(PVOID virtualAddress, PVOID str) 

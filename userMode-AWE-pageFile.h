@@ -227,7 +227,8 @@ BOOLEAN
 zeroPageWriter();
 
 /*
- * TODO: bump refcount and set read in progress bit 
+ * TODO (future): bump refcount and set read in progress bit
+ * 
  * modifiedPageWriter: function to pull a page off modified list and write to pagefile
  * - checks if rhere are any pages on modified list
  * - if there are, call writePage, update status bits and enqueue PFN to standby list

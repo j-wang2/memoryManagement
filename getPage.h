@@ -4,6 +4,7 @@
 /*
  * getZeroPage: function to get a page off zero list
  *  - called by getPage
+ *  - invalidates PFN pagefile index
  * 
  * Returns PPFNdata
  *  - returnPFN (pfn metadata for the returned page) on success
