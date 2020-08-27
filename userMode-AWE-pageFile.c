@@ -10,6 +10,7 @@
 #include "pageFile.h"
 #include "getPage.h"
 #include "PTEpermissions.h"
+#include "VApermissions.h"
 #include "pageFault.h"
 
 
@@ -31,7 +32,9 @@ void* pageFileFormatVA;             // specific VA used for copying in page cont
 ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 
 // Execute-Write-Read (bit ordering)
-ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask | executeMask), (readMask | writeMask | executeMask)};
+ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask | executeMask), (readMask | writeMask | executeMask) };
+
+
 
 listData listHeads[ACTIVE];         // intialization of listHeads array
 
@@ -60,202 +63,6 @@ getPTE(void* virtualAddress)
     currPTE = PTEarray + pageTableIndex;
 
     return currPTE;
-}
-
-
-faultStatus 
-accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions) 
-{
-    // initialize PFstatus to success - only changes on pagefault return val
-    faultStatus PFstatus;
-    PFstatus = SUCCESS;
-
-    while (PFstatus == SUCCESS) {
-
-        _try {
-
-            if (RWEpermissions == READ_ONLY || READ_EXECUTE) {
-
-                *(volatile CHAR *)virtualAddress;                                       // read
-
-            } else if (RWEpermissions == READ_WRITE || READ_WRITE_EXECUTE) {
-
-                *(volatile CHAR *)virtualAddress = *(volatile CHAR *)virtualAddress;    // write
-
-            } else {
-
-                fprintf(stderr, "invalid permissions\n");    
-
-            }
-
-            break;
-
-        } _except (EXCEPTION_EXECUTE_HANDLER) {
-
-            PFstatus = pageFault(virtualAddress, RWEpermissions);
-
-        }
-
-    }
-
-    return PFstatus;
-}
-
-
-faultStatus 
-isVAaccessible (PVOID virtualAddress, PTEpermissions RWEpermissions) 
-{
-    _try {
-        if (RWEpermissions == READ_ONLY || RWEpermissions == READ_EXECUTE) {
-            *(volatile CHAR *)virtualAddress;                                                      // read
-
-        } else if (RWEpermissions == READ_WRITE || RWEpermissions == READ_WRITE_EXECUTE) {
-            *(volatile CHAR *)virtualAddress = *(volatile CHAR *)virtualAddress;                   // write
-
-        }  else {
-            fprintf(stderr, "invalid permissions\n");
-        }
-        return SUCCESS;
-    } _except (EXCEPTION_EXECUTE_HANDLER) {
-        return ACCESS_VIOLATION;
-    }
-}
-
-
-BOOLEAN
-commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
-{
-
-    // get the PTE from the VA
-    PPTE currPTE;
-    currPTE = getPTE(startVA);
-
-    // invalid VA (not in range)
-    if (currPTE == NULL) {
-        return FALSE;
-    }
-    
-    // make a shallow copy/"snapshot" of the PTE to edit and check
-    PTE tempPTE;
-    tempPTE = *currPTE;
-
-    // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
-    if (tempPTE.u1.hPTE.validBit == 1 || tempPTE.u1.tPTE.transitionBit == 1 || tempPTE.u1.pfPTE.permissions != NO_ACCESS) { // check!! tempPTE.u1.dzPTE.demandZeroBit == 1
-        printf("PFN is already valid, transition, or demand zero\n");
-        return FALSE;
-    }
-
-    if (totalCommittedPages < totalMemoryPageLimit) {
-
-        // commit with priviliges param
-        tempPTE.u1.dzPTE.permissions = RWEpermissions;
-
-        // set demand zero bit (commit)
-        tempPTE.u1.dzPTE.pageFileBit = 1;
-
-        tempPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
-        totalCommittedPages++;
-        printf("Committed VA at %d with permissions %d\n", (ULONG) startVA, RWEpermissions);
-    
-    } else {
-        // no remaining pages
-        fprintf(stderr, "no remaining pages\n");
-        return FALSE;
-    }
-
-    * (volatile PTE *) currPTE = tempPTE;
-    return TRUE;
-}
-
-
-BOOLEAN
-decommitVA (PVOID startVA, ULONG_PTR commitSize) {
-    PPTE currPTE;
-    currPTE = getPTE(startVA);
-
-    if (currPTE == NULL) {
-        return FALSE;
-    }
-
-    // make a shallow copy/"snapshot" of the PTE to edit and check
-    PTE tempPTE;
-    tempPTE = *currPTE;
-
-    // check if PTE is already zeroed
-    if (tempPTE.u1.ulongPTE == 0) {
-        fprintf(stderr, "VA is already decommitted\n");
-        return FALSE;
-    }
-
-    // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
-
-    else if (tempPTE.u1.hPTE.validBit == 1) {                       // valid/hardware format
-
-        // get PFN
-        PPFNdata currPFN;
-        currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
-
-        // unmap VA from page
-        MapUserPhysicalPages(startVA, 1, NULL);
-
-        // if the PFN contents is also stored in pageFile
-        if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
-            clearPFBitIndex(currPFN->pageFileOffset);
-        }
-
-        // enqueue Page to free list
-        enqueuePage(&freeListHead, currPFN);
-
-    } 
-    else if (tempPTE.u1.tPTE.transitionBit == 1) {                  // transition format
-
-        // get PFN
-        PPFNdata currPFN;
-        currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
-
-
-        // dequeue from standby/modified list
-        dequeueSpecificPage(currPFN);
-        
-        // if the PFN contents is also stored in pageFile
-        if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
-            clearPFBitIndex(currPFN->pageFileOffset);
-        }
-
-        // enqueue Page to free list
-        enqueuePage(&freeListHead, currPFN);
-
-    }  
-    else if (tempPTE.u1.pfPTE.pageFileIndex < PAGEFILE_PAGES) {     // pagefile format
-
-        clearPFBitIndex(tempPTE.u1.pfPTE.pageFileIndex);
-        tempPTE.u1.ulongPTE = 0;
-
-    }
-
-    else if (tempPTE.u1.ulongPTE == 0) {                            // zero PTE
-        fprintf(stderr, "already decommitted\n");
-        return TRUE;
-    }
-    // else if (tempPTE.u1.dzPTE)
-    // TODO: need to handle dzPTE and pfPT
-
-    if (totalCommittedPages != 0)  {
-
-        // decrement count of committed pages and zero PTE
-        totalCommittedPages--;
-
-    } else {
-
-        fprintf(stderr, "error - no committed pages\n");
-        return FALSE;
-
-    }
-
-    memset(&tempPTE, 0, sizeof(PTE));
-
-    * (volatile PTE *) currPTE = tempPTE;
-    return TRUE;
 }
 
 
@@ -551,19 +358,6 @@ zeroPageWriter()
 }
 
 
-/*
- * FIX1
- * - check if rhere are any pages on modified list
- * - find free block in pagefile (by checking pageFile bitmap)
- * - if found
- *    - copy address of disk into PFN
- *    - take entry off modified list
- *    - map page to modifiedWriteVA
- *    - copy contents of modifiedWRite VA to pagefile location
- *    - mark pf location as busy
- * TODO: bump refcount and set read in progress bit 
- * 
- */
 BOOLEAN
 modifiedPageWriter()
 {
@@ -687,16 +481,19 @@ main()
     for (int i = 0; i < testNum; i++) {
         faultStatus testStatus;
 
-        // commitVA(testVA, READ_EXECUTE, 1);    // can commit (doesnt cause crash)
-        commitVA(testVA, READ_WRITE_EXECUTE, 1);    // can commit
+        // commitVA(testVA, READ_ONLY, 1);    // commits with READ_ONLY permissions
+        // protectVA(testVA, READ_WRITE_EXECUTE, 1);
+        commitVA(testVA, READ_WRITE_EXECUTE, 1);    // commits with RWE permissions
 
         // decommitVA(testVA, 1);
     
-        if (i % 2 == 0) {
+        if (i % 2 == 1) {
             testStatus = accessVA(testVA, READ_WRITE);
         } else {
             testStatus = accessVA(testVA, READ_ONLY);
         }
+
+        * (PVOID *) testVA = testVA;                    // write 8 bytes
 
         printf("tested (VA = %d), return status = %d\n", (ULONG) testVA, testStatus);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);

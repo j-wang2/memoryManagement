@@ -154,54 +154,6 @@ getPTE(void* virtualAddress);
 
 
 /*
- * accessVA: function to access a VA, given either read or write permissions
- *  - pagefaults if not already valid
- *  - checks read/write permissions, but not execute
- * 
- * Returns faultStatus value
- *  - SUCCESS on success
- *  - ACCESS_VIOLATION on failure
- */
-faultStatus
-accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions);
-
-
-/*
- * isVAaccessible: function to check access to a VA - DOES NOT pagefault on failure
- * 
- * Returns faultStatus value
- *  - SUCCESS on success
- *  - ACCESS_VIOLATION on failure (1)
- */
-faultStatus 
-isVAaccessible (PVOID virtualAddress, PTEpermissions RWEpermissions);
-
-
-/*
- * commitVA: function to commit a VA
- *  - changes PTE to demand zero
- *  - checks whether there is still memory left
- * 
- * Returns boolean
- *  - TRUE on success
- *  - FALSE on failure
- */
-BOOLEAN
-commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize);
-
-
-/*TODO - need to adapt for PF format
- * decommitVA: function to decommit a given virtual address
- * 
- * Returns BOOLEAN
- *  - TRUE on success
- *  - FALSE on failure (VA out of bounds, PTE already zero)
- */
-BOOLEAN
-decommitVA (PVOID startVA, ULONG_PTR commitSize);
-
-
-/*
  * trimPage(void* VA): function to trim the entire containing page corresponding to VA param
  *  - Converts from VALID format PTE to TRANSITION format PTE
  * 
@@ -274,12 +226,21 @@ zeroPage(ULONG_PTR PFN);
 BOOLEAN
 zeroPageWriter();
 
-
+/*
+ * TODO: bump refcount and set read in progress bit 
+ * modifiedPageWriter: function to pull a page off modified list and write to pagefile
+ * - checks if rhere are any pages on modified list
+ * - if there are, call writePage, update status bits and enqueue PFN to standby list
+ * 
+ * returns BOOLEAN:
+ *  - TRUE on success
+ *  - FALSE on failure
+ */
 BOOLEAN
 modifiedPageWriter();
 
 
-// might be local
+/********* LOCAL functions *******/
 VOID
 initLinkHead(PLIST_ENTRY headLink);
 

@@ -2,6 +2,9 @@
 #include "enqueue-dequeue.h" 
 #include "getPage.h"
 
+// Array used to convert PTEpermissions enum to standard windows permissions
+DWORD windowsPermissions[] = { PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE };
+
 
 faultStatus
 validPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
@@ -103,8 +106,15 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     // compiler writes out as indivisible store
     * (volatile PTE *) masterPTE = newPTE;
 
+    DWORD oldPermissions;
+
+    // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a lack of permissions protection
+
     // assign VA to point at physical page, mirroring our local PTE change
     MapUserPhysicalPages(virtualAddress, 1, &pageNum);
+
+    // update physical permissions of hardware PTE to match our software reference.
+    VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[transRWEpermissions], &oldPermissions);
 
     return SUCCESS;
 
@@ -199,8 +209,15 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // compiler writes out as indivisible store
     * (volatile PTE *) masterPTE = newPTE;
 
-    // assign VA to point at physical page, mirroring our local PTE change 
+    DWORD oldPermissions;
+
+    // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a lack of permissions protection
+
+    // assign VA to point at physical page, mirroring our local PTE change
     MapUserPhysicalPages(virtualAddress, 1, &pageNum);
+
+    // update physical permissions of hardware PTE to match our software reference.
+    VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[pageFileRWEpermissions], &oldPermissions);
 
     return SUCCESS;
 
@@ -263,9 +280,20 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
     // compiler writes out as indivisible store
     * (volatile PTE *) masterPTE = newPTE;
+    
+    DWORD oldPermissions;
+
+    // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a lack of permissions protection
 
     // assign VA to point at physical page, mirroring our local PTE change
     MapUserPhysicalPages(virtualAddress, 1, &pageNum);
+
+    BOOLEAN bresult;
+    // update physical permissions of hardware PTE to match our software reference.
+    bresult = VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[dZeroRWEpermissions], &oldPermissions);
+    if (bresult != TRUE) {
+        fprintf(stderr, "error\n");
+    }
 
     return SUCCESS;                                             // return value of 2; 
 

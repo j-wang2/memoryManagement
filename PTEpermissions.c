@@ -48,7 +48,7 @@ checkPTEpermissions(PTEpermissions currP, PTEpermissions checkP)
 
     // get mask for permissions to check and logical and it with current mask
     if ( (permissionMasks[checkP] & permissionMasks[currP] ) != permissionMasks[checkP]) {
-        DebugBreak();
+        // DebugBreak();
         return FALSE;
     }
 

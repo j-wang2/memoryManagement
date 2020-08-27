@@ -7,7 +7,7 @@ CURRPROG = userMode-AWE-pageFile
 PROGS = $(CURRPROG).exe
 OBJS = *.obj
 
-SOURCES = $(CURRPROG).c enqueue-dequeue.c pageFault.c pageFile.c getPage.c PTEpermissions.c
+SOURCES = $(CURRPROG).c enqueue-dequeue.c pageFault.c pageFile.c getPage.c PTEpermissions.c VApermissions.c
 
 
 CFLAGS = /DEBUG:FULL /Zi
