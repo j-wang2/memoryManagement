@@ -58,7 +58,6 @@ clearPFBitIndex(ULONG_PTR pfVA)
 }
 
 
-
 BOOLEAN
 writePage(PPFNdata PFNtoWrite)
 {
