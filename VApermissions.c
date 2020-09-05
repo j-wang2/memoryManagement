@@ -112,7 +112,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
         tempPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
         totalCommittedPages++;
-        printf("Committed VA at %d with permissions %d\n", (ULONG) startVA, RWEpermissions);
+        printf("Committed VA at %llu with permissions %d\n", (ULONG_PTR) startVA, RWEpermissions);
     
     } else {
         // no remaining pages

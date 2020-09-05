@@ -226,6 +226,10 @@ zeroPage(ULONG_PTR PFN);
 BOOLEAN
 zeroPageWriter();
 
+
+DWORD WINAPI
+zeroPageThread();
+
 /*
  * TODO (future): bump refcount and set read in progress bit
  * 
