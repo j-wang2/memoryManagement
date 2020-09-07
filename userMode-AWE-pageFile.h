@@ -10,6 +10,8 @@
 #pragma comment(lib, "Advapi32.lib")
 
 #define NUM_PAGES 512
+// #define NUM_PAGES 6400000
+
 #define PTE_INDEX_BITS 9        // log2(NUM_PAGES)
 #define PAGE_SIZE 4096
 #define PAGE_SHIFT 12           // number of bits to multiply/divide by page size
@@ -41,7 +43,6 @@ typedef struct _transitionPTE{
 typedef struct _pageFilePTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
-    ULONG64 pageFileBit: 1;       // pfbit MUST be 1 for pfPTE
     ULONG64 permissions: 3;
     ULONG64 pageFileIndex: PAGEFILE_BITS;
 } pageFilePTE, *PpageFilePTE;
@@ -49,7 +50,6 @@ typedef struct _pageFilePTE{
 typedef struct _demandZeroPTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
-    ULONG64 pageFileBit: 1;       // pf bit is 1 for dzPTE
     ULONG64 permissions: 3;
     ULONG64 pageFileIndex: PAGEFILE_BITS;   // PF index MUST be INVALID_PAGEFILE_INDEX( MAXULONG_PTR) for dzPTE
 } demandZeroPTE, *PdemandZeroPTE;
@@ -77,6 +77,8 @@ typedef struct _PFNdata {
 typedef struct _listData {
     LIST_ENTRY head;
     ULONG64 count;
+    CRITICAL_SECTION lock;
+    HANDLE newPagesEvent;
 } listData, *PlistData;
 
 typedef enum {
@@ -141,6 +143,9 @@ extern listData listHeads[ACTIVE];
 #define standbyListHead listHeads[STANDBY]
 #define modifiedListHead listHeads[MODIFIED]
 
+// toggle multithreading on and off
+#define MULTITHREADING
+
 
 /*
  * getPTE: function to find corresponding PTE from a given VA
@@ -166,6 +171,9 @@ trimPage(void* virtualAddress);
 
 
 /*****************************************************************
+
+    * ADAPTED FROM https://docs.microsoft.com/en-us/windows/win32/memory/awe-example *
+
    LoggedSetLockPagesPrivilege: a function to obtain or
    release the privilege of locking physical pages.
 
@@ -177,6 +185,7 @@ trimPage(void* virtualAddress);
        BOOL bEnable: Enable (TRUE) or disable?
 
    Return value: TRUE indicates success, FALSE failure.
+
 
 *****************************************************************/
 BOOL
@@ -243,6 +252,10 @@ zeroPageThread();
  */
 BOOLEAN
 modifiedPageWriter();
+
+
+DWORD WINAPI
+modifiedPageThread();
 
 
 /********* LOCAL functions *******/

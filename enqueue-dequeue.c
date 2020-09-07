@@ -17,17 +17,29 @@ enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem)
 VOID
 enqueuePage(PlistData listHead, PPFNdata PFN)
 {
+
+    //lock listHead (since listHead values are not changed/accessed until dereferenced)
+    EnterCriticalSection(&(listHead->lock));
+
     // enqueue onto list
     enqueue( &(listHead->head), &(PFN->links) );
 
     // update pagecount of that list
     listHead->count++;
 
+    #ifdef MULTITHREADING
+    SetEvent(listHead->newPagesEvent);
+    #endif
+
+    // unlock listHead
+    LeaveCriticalSection(&(listHead->lock));
+
     // set statusBits to the list we've just enqueued the page on
     PFN->statusBits = listHead - listHeads;
 }
 
 
+// TODO - add another state for "no longer on list"
 PPFNdata
 dequeuePage(PlistData listHead) 
 {
@@ -35,11 +47,18 @@ dequeuePage(PlistData listHead)
     PLIST_ENTRY headLink;
     headLink = &(listHead->head);
 
+    //lock listHead (since listHead values are not changed/accessed until dereferenced)
+    EnterCriticalSection(&(listHead->lock));
+
     // verify list has items chained to the head
     if (headLink->Flink == headLink) {
         ASSERT(listHead->count == 0);
 
-        fprintf(stderr, "empty list\n");
+        // unlock listHead
+        LeaveCriticalSection(&(listHead->lock));
+
+        // fprintf(stderr, "empty list\n");
+
         return NULL;
     }
 
@@ -62,6 +81,9 @@ dequeuePage(PlistData listHead)
     // decrement count
     listHead->count--;
 
+    // unlock listHead
+    LeaveCriticalSection(&(listHead->lock));
+
     returnPFN = CONTAINING_RECORD(returnLink, PFNdata, links);
 
     return returnPFN;
@@ -75,11 +97,18 @@ dequeuePageFromTail(PlistData listHead)
     PLIST_ENTRY headLink;
     headLink = &(listHead->head);
 
+    // lock listHead
+    EnterCriticalSection(&(listHead->lock));
+
     // verify list has items chained to the head
     if (headLink->Flink == headLink) {
+
         ASSERT(listHead->count == 0);
 
-        fprintf(stderr, "empty list\n");
+        // unlock listHead
+        LeaveCriticalSection(&(listHead->lock));
+
+        // fprintf(stderr, "empty list\n");
         return NULL;
     }
 
@@ -101,6 +130,9 @@ dequeuePageFromTail(PlistData listHead)
 
     // decrement count
     listHead->count--;
+
+    // unlock listHead
+    LeaveCriticalSection(&(listHead->lock));
 
     returnPFN = CONTAINING_RECORD(returnLink, PFNdata, links);
 

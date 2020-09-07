@@ -34,9 +34,12 @@ ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 // Execute-Write-Read (bit ordering)
 ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask | executeMask), (readMask | writeMask | executeMask) };
 
-
 listData listHeads[ACTIVE];         // intialization of listHeads array
 
+BOOLEAN debugMode;
+
+#define TESTING_ZERO
+// #define CHECK_PAGEFILE
 
 PPTE
 getPTE(void* virtualAddress)
@@ -272,7 +275,9 @@ initPFNarray(PULONG_PTR aPFNs, int numPages, int pageSize)
     for (int i = 0; i < numPages; i++) {
 
         PPFNdata currPFN = PFNarray + aPFNs[i];
-        enqueuePage(&freeListHead, currPFN);        
+
+        enqueuePage(&freeListHead, currPFN);       
+
     }
 
     return PFNarray;
@@ -331,13 +336,16 @@ zeroPage(ULONG_PTR PFN)
 BOOLEAN
 zeroPageWriter()
 {
-    printf("freeListCount == %llu\n", freeListHead.count);
+    // printf("freeListCount == %llu\n", freeListHead.count);
+
+
 
     PPFNdata PFNtoZero;
     PFNtoZero = dequeuePage(&freeListHead);
 
+
     if (PFNtoZero == NULL) {
-        fprintf(stderr, "free list empty - could not write out\n");
+        // fprintf(stderr, "free list empty - could not write out\n");
         return FALSE;
     }
 
@@ -350,15 +358,22 @@ zeroPageWriter()
 
     // enqueue to zeroList (updates status bits in PFN metadata)
     enqueuePage(&zeroListHead, PFNtoZero);
-    printf(" - Moved page from free -> zero \n");
+    // printf(" - Moved page from free -> zero \n");
 
     return TRUE;
 }
 
-// BOOLEAN
+
 DWORD WINAPI
-zeroPageThread(HANDLE* handleArray)
+zeroPageThread(HANDLE terminationHandle)
 {
+
+    int numZeroed = 0;
+    int numWaited = 0;
+    // create local handle array
+    HANDLE handleArray[2];
+    handleArray[0] = terminationHandle;
+    handleArray[1] = freeListHead.newPagesEvent;
 
     // zero pages until none left to zero
     while (TRUE) {
@@ -370,15 +385,81 @@ zeroPageThread(HANDLE* handleArray)
             DWORD index = retVal - WAIT_OBJECT_0;
 
             if (index == 0) {
+                printf("zeropagetthread - numPages moved : %d, numWaited : %d \n", numZeroed, numWaited);
                 return 0;
             }
+
+            // printf("NEW PAGES in free list\n");
+            numWaited ++;
+
             continue;
         }
-
+        numZeroed++;
         // return TRUE;
     }
 
 }
+
+
+BOOLEAN
+freePageTestWriter()
+{
+    // printf("zeroListCount == %llu\n", zeroListHead.count);
+
+    PPFNdata PFNtoFree;
+    PFNtoFree = dequeuePage(&zeroListHead);
+
+
+    if (PFNtoFree == NULL) {
+        // fprintf(stderr, "zero list empty - could not write out\n");
+        return FALSE;
+    }
+
+    // enqueue to freeList (updates status bits in PFN metadata)
+    enqueuePage(&freeListHead, PFNtoFree);
+
+    // printf(" - Moved page from zero -> free \n");
+
+    return TRUE;
+}
+
+
+DWORD WINAPI
+freePageTestThread(HANDLE terminationHandle)
+{
+
+    int numZeroed = 0;
+    int numWaited = 0;
+
+    // create local handle array
+    HANDLE handleArray[2];
+    handleArray[0] = terminationHandle;
+    handleArray[1] = zeroListHead.newPagesEvent;
+
+    // zero pages until none left to zero
+    while (TRUE) {
+        BOOLEAN bres;
+        bres = freePageTestWriter();
+        if (bres == FALSE) {
+
+            DWORD retVal = WaitForMultipleObjects(2, handleArray, FALSE, INFINITE);
+            DWORD index = retVal - WAIT_OBJECT_0;
+
+            if (index == 0) {
+                printf("freepagetestthread - numPages moved : %d, numWaited : %d \n", numZeroed, numWaited);
+                return 0;
+            }
+
+            // printf("NEW PAGES in zero list\n");
+            numWaited++;
+            continue;
+        }
+        numZeroed++;
+
+        // return TRUE;
+    }
+}
+
 
 
 BOOLEAN
@@ -426,9 +507,28 @@ initLinkHead(PLIST_ENTRY headLink)
 VOID
 initListHead(PlistData headData)
 {
+
+    // initialize lock field
+    InitializeCriticalSection(&(headData->lock));
+
+    // initialize head
     initLinkHead(&(headData->head));
+
+    // initialize count
     headData->count = 0;
+
+    HANDLE pagesCreatedHandle;
+    pagesCreatedHandle =  CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    if (pagesCreatedHandle == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "failed to create event handle\n");
+        exit(-1);
+    }
+
+    headData->newPagesEvent = pagesCreatedHandle;
+
 }
+
 
 VOID 
 initListHeads(PlistData listHeadArray)
@@ -453,7 +553,7 @@ testRoutine()
     printf("--------------------------------\n");
 
 
-    /************* FAULTING in testVAs *****************/
+    /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
     ULONG_PTR testNum = 10;
     printf("Committing and then faulting in %llu pages\n", testNum);
@@ -502,41 +602,52 @@ testRoutine()
             modifiedPageWriter();
 
         } 
-        /*
+        #ifndef MULTITHREADING                      // TODO: move when we have modifiedpagewriter thread
         else {
-
+            
             zeroPageWriter();
 
         }
-        */
+        #endif
     
     }
 
+    #ifdef MULTITHREADING
+    /************* Creating handles/threads *************/
 
     HANDLE terminateZeroPageHandle;
-    terminateZeroPageHandle =  CreateEvent(NULL, FALSE, FALSE, NULL);
+    terminateZeroPageHandle =  CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (terminateZeroPageHandle == INVALID_HANDLE_VALUE) {
         fprintf(stderr, "failed to create event handle\n");
     }
 
-    HANDLE freePagesCreatedHandle;
-    freePagesCreatedHandle =  CreateEvent(NULL, FALSE, FALSE, NULL);
-
-    if (freePagesCreatedHandle == INVALID_HANDLE_VALUE) {
-        fprintf(stderr, "failed to create event handle\n");
-    }
-
-    HANDLE handles[2];
-    handles[0] = terminateZeroPageHandle;
-    handles[1] = freePagesCreatedHandle;
-
     HANDLE zeroPageHandle;
-    zeroPageHandle = CreateThread(NULL, 0, zeroPageThread, handles, 0, NULL);
+    zeroPageHandle = CreateThread(NULL, 0, zeroPageThread, terminateZeroPageHandle, 0, NULL);
 
     if (zeroPageHandle == INVALID_HANDLE_VALUE) {
         fprintf(stderr, "failed to create zeroPage handle\n");
     }
+
+
+    #ifdef TESTING_ZERO
+    /************ for testing of zeropagethread **************/
+
+    HANDLE freePageTestHandle;
+    freePageTestHandle = CreateThread(NULL, 0, freePageTestThread, terminateZeroPageHandle, 0, NULL);
+
+    if (freePageTestHandle == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "failed to create zeroPage handle\n");
+    }
+    #endif
+
+    // HANDLE zeroPageHandle2;
+    // zeroPageHandle2 = CreateThread(NULL, 0, zeroPageThread, handles, 0, NULL);
+    // if (zeroPageHandle == INVALID_HANDLE_VALUE) {
+    //     fprintf(stderr, "failed to create zeroPage handle\n");
+    // }
+
+    #endif
 
     printf("--------------------------------\n");
 
@@ -551,24 +662,27 @@ testRoutine()
     //     testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
     // }
 
+
+    /****************** FAULTING back in trimmed pages ******************/
+
     testVA = leafVABlock;
 
     for (int i = 0; i < testNum; i++) {
         // trimPage(testVA);
 
-#define CHECK_PAGEFILE
-#ifdef CHECK_PAGEFILE
+        #ifdef CHECK_PAGEFILE
         // to test PF fault - switch order in getPage and add this
         for (int j = 0; j < 3; j++) {
             getPage();
         }
-#endif
+        #endif
 
-        faultStatus testStatus = pageFault(testVA, READ_WRITE);  // to TEST VAs
+        faultStatus testStatus = pageFault(testVA, READ_WRITE);        // to TEST VAs
         // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
         printf("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
     }
+
 
     /***************** DECOMMITTING AND CHECKING VAs **************/
 
@@ -576,8 +690,8 @@ testRoutine()
 
     for (int i = 0; i < testNum; i++) {
 
-        printf("decommiting (VA = %llu) with contents %llu\n", (ULONG_PTR) testVA, * (ULONG_PTR*) testVA);
-        printf("decommiting (VA = %llu) with contents %s\n", (ULONG_PTR) testVA, * (PCHAR *) testVA);
+        printf("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) testVA, * (ULONG_PTR*) testVA);
+        printf("decommiting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) testVA, * (PCHAR *) testVA);
 
         decommitVA(testVA, 1);
 
@@ -589,12 +703,23 @@ testRoutine()
 
     WaitForSingleObject(zeroPageHandle, INFINITE);
 
+
+    #ifdef TESTING_ZERO
+    WaitForSingleObject(freePageTestHandle, INFINITE);
+    #endif
+
+    // WaitForSingleObject(zeroPageHandle2, INFINITE);
+
 }
 
 
 VOID 
-main() 
+main(int argc, char** argv) 
 {
+    if (argc > 1 && strcmp(argv[1], "-v") == 0) {
+        debugMode = TRUE;
+    }
+
     initListHeads(listHeads);
 
     // reserve AWE address for zeroVA

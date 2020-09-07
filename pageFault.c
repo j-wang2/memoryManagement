@@ -340,13 +340,13 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         return status;
 
     }
-    else if (oldPTE.u1.pfPTE.pageFileIndex < PAGEFILE_PAGES) {          // PAGEFILE STATE PTE
+    else if (oldPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {          // PAGEFILE STATE PTE
 
         status = pageFilePageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);  
         return status;
 
     }
-    else if (oldPTE.u1.pfPTE.pageFileBit == 1) {                        // DEMAND ZERO STATE PTE  
+    else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS) {                        // DEMAND ZERO STATE PTE  
 
         status = demandZeroPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
         return status;

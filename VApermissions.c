@@ -104,11 +104,8 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
     if (totalCommittedPages < totalMemoryPageLimit) {
 
-        // commit with priviliges param
+        // commit with priviliges param (commits PTE)
         tempPTE.u1.dzPTE.permissions = RWEpermissions;
-
-        // set demand zero bit (commit)
-        tempPTE.u1.dzPTE.pageFileBit = 1;
 
         tempPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
         totalCommittedPages++;
@@ -235,13 +232,13 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
         enqueuePage(&freeListHead, currPFN);
 
     }  
-    else if (tempPTE.u1.pfPTE.pageFileIndex < PAGEFILE_PAGES) {     // pagefile format
+    else if (tempPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {     // pagefile format
 
         clearPFBitIndex(tempPTE.u1.pfPTE.pageFileIndex);
         tempPTE.u1.ulongPTE = 0;
 
     }
-    else if (tempPTE.u1.pfPTE.pageFileBit == 1) {                   // demand zero format
+    else if (tempPTE.u1.pfPTE.permissions != NO_ACCESS) {                   // demand zero format
 
         tempPTE.u1.ulongPTE = 0;
 

@@ -83,9 +83,6 @@ getStandbyPage()
             // put PF index into dz format PTE
             newPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
 
-            // set pagefile bit
-            newPTE.u1.pfPTE.pageFileBit = 1;
-
             returnPFN->statusBits = FREE;
 
             // copy newPTE back into currPTE
@@ -100,9 +97,6 @@ getStandbyPage()
 
         // put PF index into pf format PTE
         newPTE.u1.pfPTE.pageFileIndex = returnPFN->pageFileOffset;
-
-        // set pagefile bit
-        newPTE.u1.pfPTE.pageFileBit = 1;
 
         returnPFN->statusBits = FREE;
 
@@ -131,6 +125,7 @@ getPage()
         ULONG_PTR PFN;
         PFN = returnPFN - PFNarray;
 
+        // TODO - fix zeroVA multithreading
         // zeroPage (does not update status bits in PFN metadata)
         zeroPage(PFN);
 
