@@ -15,7 +15,7 @@ getPTEpermissions(PTE curr)
             return READ_ONLY;
         }
     } else {
-        fprintf(stderr, "getPTEpermissions called on an invalid PTE\n");
+        PRINT_ERROR("getPTEpermissions called on an invalid PTE\n");
         return NO_ACCESS;
     }
 }

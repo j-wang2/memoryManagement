@@ -11,7 +11,7 @@ getZeroPage()
         returnPFN = dequeuePage(&zeroListHead);
 
         if (returnPFN == NULL) {
-            fprintf(stderr, "Error in getPage(): unable to pull page off free\n");
+            PRINT_ERROR("Error in getPage(): unable to pull page off free\n");
             return NULL;
         }
 
@@ -33,7 +33,7 @@ getFreePage()
         returnPFN = dequeuePage(&freeListHead);
 
         if (returnPFN == NULL) {
-            fprintf(stderr, "Error in getPage(): unable to pull page off free\n");
+            PRINT_ERROR("Error in getPage(): unable to pull page off free\n");
             return NULL;
         }
 
@@ -57,7 +57,7 @@ getStandbyPage()
         returnPFN = dequeuePageFromTail(&standbyListHead);
 
         if (returnPFN == NULL) {
-            fprintf(stderr, "Error in getPage(): unable to pull page off standby\n");
+            PRINT_ERROR("Error in getPage(): unable to pull page off standby\n");
             return NULL;
         }
 
@@ -117,7 +117,6 @@ getPage()
 
     PPFNdata returnPFN;
 
-#define CHECK_PAGEFILE
 #ifdef CHECK_PAGEFILE
     // standby list
     returnPFN = getStandbyPage();
@@ -132,7 +131,7 @@ getPage()
         // set PF offset to our "null" value in the PFN metadata
         returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
-        printf("Allocated PFN from standby list\n");
+        PRINT("Allocated PFN from standby list\n");
 
         return returnPFN;   
     }
@@ -146,7 +145,7 @@ getPage()
         // set PF offset to our "null" value in the PFN metadata
         returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
-        printf("Allocated PFN from zero list\n");
+        PRINT("Allocated PFN from zero list\n");
 
         return returnPFN;
 
@@ -165,7 +164,7 @@ getPage()
         // set PF offset to our "null" value in the PFN metadata
         returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
-        printf("Allocated PFN from free list\n");
+        PRINT("Allocated PFN from free list\n");
 
         return returnPFN;
     }
@@ -183,13 +182,13 @@ getPage()
         // set PF offset to our "null" value in the PFN metadata
         returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
-        printf("Allocated PFN from standby list\n");
+        PRINT("Allocated PFN from standby list\n");
 
         return returnPFN;   
     }
 
 
-    fprintf(stderr, "All lists empty - unable to get page\n");
+    PRINT_ERROR("All lists empty - unable to get page\n");      // TODO - needs to be handled to avoid deadlock
     return returnPFN;                                           // should be NULL
 
 }

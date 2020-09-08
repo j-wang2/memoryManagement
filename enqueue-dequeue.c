@@ -57,8 +57,6 @@ dequeuePage(PlistData listHead)
         // unlock listHead
         LeaveCriticalSection(&(listHead->lock));
 
-        // fprintf(stderr, "empty list\n");
-
         return NULL;
     }
 
@@ -108,7 +106,6 @@ dequeuePageFromTail(PlistData listHead)
         // unlock listHead
         LeaveCriticalSection(&(listHead->lock));
 
-        // fprintf(stderr, "empty list\n");
         return NULL;
     }
 

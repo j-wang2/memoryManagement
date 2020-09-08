@@ -39,14 +39,16 @@ listData listHeads[ACTIVE];         // intialization of listHeads array
 BOOLEAN debugMode;
 
 #define TESTING_ZERO
-// #define CHECK_PAGEFILE
+
+
+
 
 PPTE
 getPTE(void* virtualAddress)
 {
     // verify VA param is within the range of the VA block
     if (virtualAddress < leafVABlock || virtualAddress >= leafVABlockEnd) {
-        fprintf(stderr, "access violation \n");
+        PRINT_ERROR("access violation \n");
         return NULL;
     }
 
@@ -71,13 +73,13 @@ getPTE(void* virtualAddress)
 BOOLEAN
 trimPage(void* virtualAddress)
 {
-    printf("trimming page with VA %llu\n", (ULONG_PTR) virtualAddress);
+    PRINT("trimming page with VA %llu\n", (ULONG_PTR) virtualAddress);
 
     PPTE PTEaddress;
     PTEaddress = getPTE(virtualAddress);
 
     if (PTEaddress == NULL) {
-        fprintf(stderr, "could not trim VA %llu - no PTE associated with address\n", (ULONG_PTR) virtualAddress);
+        PRINT_ERROR("could not trim VA %llu - no PTE associated with address\n", (ULONG_PTR) virtualAddress);
         return FALSE;
     }
     
@@ -87,7 +89,7 @@ trimPage(void* virtualAddress)
 
     // check if PTE's valid bit is set - if not, can't be trimmed and return failure
     if (oldPTE.u1.hPTE.validBit == 0) {
-        fprintf(stderr, "could not trim VA %llu - PTE is not valid\n", (ULONG_PTR) virtualAddress);
+        PRINT_ERROR("could not trim VA %llu - PTE is not valid\n", (ULONG_PTR) virtualAddress);
         return FALSE;
     }
 
@@ -252,7 +254,7 @@ initPFNarray(PULONG_PTR aPFNs, int numPages, int pageSize)
     PFNarray = VirtualAlloc(NULL, (maxPFN+1)*(sizeof(PFNdata)), MEM_RESERVE, PAGE_READWRITE);
 
     if (PFNarray == NULL) {
-        fprintf(stderr, "Could not allocate for PFN metadata array\n");
+        PRINT_ERROR("Could not allocate for PFN metadata array\n");
         exit(-1);
     }
 
@@ -263,7 +265,7 @@ initPFNarray(PULONG_PTR aPFNs, int numPages, int pageSize)
 
         commitCheckVA = VirtualAlloc(newPFN, sizeof (PFNdata), MEM_COMMIT, PAGE_READWRITE);
         if (commitCheckVA == NULL) {
-            fprintf(stderr, "failed to commit subsection of PFN array at PFN %d\n", i);
+            PRINT_ERROR("failed to commit subsection of PFN array at PFN %d\n", i);
             exit(-1);
         }
 
@@ -291,7 +293,7 @@ initPTEarray(int numPages, int pageSize)
     PPTE PTEarray;
     PTEarray = VirtualAlloc(NULL, NUM_PAGES*(sizeof(PTE)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (PTEarray == NULL) {
-        fprintf(stderr, "Could not allocate for PTEarray\n");
+        PRINT_ERROR("Could not allocate for PTEarray\n");
         exit(-1);
     }
     return PTEarray;
@@ -304,7 +306,7 @@ initPageFile(int diskSize)
     void* pageFileAddress;
     pageFileAddress = VirtualAlloc(NULL, diskSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (pageFileAddress == NULL) {
-        fprintf(stderr, "Could not allocate for pageFile\n");
+        PRINT_ERROR("Could not allocate for pageFile\n");
         exit(-1);
     }
     return pageFileAddress;
@@ -317,7 +319,7 @@ zeroPage(ULONG_PTR PFN)
 
     // map given page to the "zero" VA
     if (!MapUserPhysicalPages(zeroVA, 1, &PFN)) {
-        fprintf(stderr, "error remapping zeroVA\n");
+        PRINT_ERROR("error remapping zeroVA\n");
         return FALSE;
     }
 
@@ -325,7 +327,7 @@ zeroPage(ULONG_PTR PFN)
 
     // unmap zeroVA from page - PFN is now ready to be alloc'd
     if (!MapUserPhysicalPages(zeroVA, 1, NULL)) {
-        fprintf(stderr, "error zeroing page\n");
+        PRINT_ERROR("error zeroing page\n");
         return FALSE;
     }
 
@@ -336,16 +338,14 @@ zeroPage(ULONG_PTR PFN)
 BOOLEAN
 zeroPageWriter()
 {
-    // printf("freeListCount == %llu\n", freeListHead.count);
-
-
+    //  PRINT("freeListCount == %llu\n", freeListHead.count);
 
     PPFNdata PFNtoZero;
     PFNtoZero = dequeuePage(&freeListHead);
 
 
     if (PFNtoZero == NULL) {
-        // fprintf(stderr, "free list empty - could not write out\n");
+        // PRINT_ERROR("free list empty - could not write out\n");
         return FALSE;
     }
 
@@ -358,7 +358,7 @@ zeroPageWriter()
 
     // enqueue to zeroList (updates status bits in PFN metadata)
     enqueuePage(&zeroListHead, PFNtoZero);
-    // printf(" - Moved page from free -> zero \n");
+    //  PRINT(" - Moved page from free -> zero \n");
 
     return TRUE;
 }
@@ -385,12 +385,12 @@ zeroPageThread(HANDLE terminationHandle)
             DWORD index = retVal - WAIT_OBJECT_0;
 
             if (index == 0) {
-                printf("zeropagetthread - numPages moved : %d, numWaited : %d \n", numZeroed, numWaited);
+                PRINT_ALWAYS("zeropagethread - numPages moved to zero list : %d, numWaited : %d\n", numZeroed, numWaited);
                 return 0;
             }
 
-            // printf("NEW PAGES in free list\n");
-            numWaited ++;
+            //  PRINT("NEW PAGES in free list\n");
+            numWaited++;
 
             continue;
         }
@@ -404,21 +404,21 @@ zeroPageThread(HANDLE terminationHandle)
 BOOLEAN
 freePageTestWriter()
 {
-    // printf("zeroListCount == %llu\n", zeroListHead.count);
+    // PRINT("zeroListCount == %llu\n", zeroListHead.count);
 
     PPFNdata PFNtoFree;
     PFNtoFree = dequeuePage(&zeroListHead);
 
 
     if (PFNtoFree == NULL) {
-        // fprintf(stderr, "zero list empty - could not write out\n");
+        // PRINT_ERROR("zero list empty - could not write out\n");
         return FALSE;
     }
 
     // enqueue to freeList (updates status bits in PFN metadata)
     enqueuePage(&freeListHead, PFNtoFree);
 
-    // printf(" - Moved page from zero -> free \n");
+    //  PRINT(" - Moved page from zero -> free \n");
 
     return TRUE;
 }
@@ -428,7 +428,7 @@ DWORD WINAPI
 freePageTestThread(HANDLE terminationHandle)
 {
 
-    int numZeroed = 0;
+    int numFreed = 0;
     int numWaited = 0;
 
     // create local handle array
@@ -446,15 +446,15 @@ freePageTestThread(HANDLE terminationHandle)
             DWORD index = retVal - WAIT_OBJECT_0;
 
             if (index == 0) {
-                printf("freepagetestthread - numPages moved : %d, numWaited : %d \n", numZeroed, numWaited);
+                PRINT_ALWAYS("freepagetestthread - numPages moved to free list: %d, numWaited : %d \n", numFreed, numWaited);
                 return 0;
             }
 
-            // printf("NEW PAGES in zero list\n");
+            //  PRINT("NEW PAGES in zero list\n");
             numWaited++;
             continue;
         }
-        numZeroed++;
+        numFreed++;
 
         // return TRUE;
     }
@@ -465,12 +465,14 @@ freePageTestThread(HANDLE terminationHandle)
 BOOLEAN
 modifiedPageWriter()
 {
-    printf("modifiedListCount == %llu\n", modifiedListHead.count);
+
+
+    PRINT("modifiedListCount == %llu\n", modifiedListHead.count);
     PPFNdata PFNtoWrite;
     PFNtoWrite = dequeuePage(&modifiedListHead);
 
     if (PFNtoWrite == NULL) {
-        fprintf(stderr, "modified list empty - could not write out\n");
+        PRINT("modified list empty - could not write out\n");
         return FALSE;
     }
 
@@ -479,7 +481,7 @@ modifiedPageWriter()
     bResult = writePage(PFNtoWrite);
 
     if (bResult != TRUE) {
-        fprintf(stderr, "error writing out page\n");
+        PRINT_ERROR("error writing out page\n");
         return FALSE;
     }
 
@@ -489,10 +491,45 @@ modifiedPageWriter()
     // enqueue page to standby
     enqueuePage(&standbyListHead, PFNtoWrite);
 
-    printf(" - Moved page from modified -> standby (wrote out to PageFile successfully)\n");
+    PRINT(" - Moved page from modified -> standby (wrote out to PageFile successfully)\n");
 
     return TRUE;   
 
+}
+
+
+DWORD WINAPI
+modifiedPageThread(HANDLE terminationHandle)
+{
+
+    int numWrittenOut = 0;
+    int numWaited = 0;
+
+    // create local handle array
+    HANDLE handleArray[2];
+    handleArray[0] = terminationHandle;
+    handleArray[1] = modifiedListHead.newPagesEvent;
+
+    // zero pages until none left to zero
+    while (TRUE) {
+        BOOLEAN bres;
+        bres = modifiedPageWriter();
+        if (bres == FALSE) {
+
+            DWORD retVal = WaitForMultipleObjects(2, handleArray, FALSE, INFINITE);
+            DWORD index = retVal - WAIT_OBJECT_0;
+
+            if (index == 0) {
+                PRINT_ALWAYS("modifiedPageThread - numPages moved to standby list: %d, numWaited : %d \n", numWrittenOut, numWaited);
+                return 0;
+            }
+
+            numWaited++;
+            continue;
+        }
+        numWrittenOut++;
+
+    }
 }
 
 
@@ -521,7 +558,7 @@ initListHead(PlistData headData)
     pagesCreatedHandle =  CreateEvent(NULL, FALSE, FALSE, NULL);
 
     if (pagesCreatedHandle == INVALID_HANDLE_VALUE) {
-        fprintf(stderr, "failed to create event handle\n");
+        PRINT_ERROR("failed to create event handle\n");
         exit(-1);
     }
 
@@ -544,19 +581,20 @@ initListHeads(PlistData listHeadArray)
 VOID
 testRoutine()
 {
+    PRINT_ALWAYS("[testRoutine]\n");
     
     /************** TESTING *****************/
     PPTE currPTE = PTEarray;
     void* testVA = leafVABlock;
 
 
-    printf("--------------------------------\n");
+    PRINT_ALWAYS("--------------------------------\n");
 
 
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
     ULONG_PTR testNum = 10;
-    printf("Committing and then faulting in %llu pages\n", testNum);
+    PRINT_ALWAYS("Committing and then faulting in %llu pages\n", testNum);
     for (int i = 0; i < testNum; i++) {
         faultStatus testStatus;
 
@@ -576,16 +614,18 @@ testRoutine()
             
         }
 
-        printf("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
+        PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
 
     }
 
 
-    printf("--------------------------------\n");
+    PRINT_ALWAYS("--------------------------------\n");
 
 
     /************ TRIMMING tested VAs (active -> standby/modified) **************/
+
+    PRINT_ALWAYS("Trimming %llu pages, modified writing half of them\n", testNum);
 
     // reset testVa
     testVA = leafVABlock;
@@ -612,21 +652,28 @@ testRoutine()
     
     }
 
+
+
     #ifdef MULTITHREADING
+
+    PRINT_ALWAYS("--------------------------------\n");
+
     /************* Creating handles/threads *************/
+    PRINT_ALWAYS("Creating threads (zeropage, freepage)\n");
+
 
     HANDLE terminateZeroPageHandle;
     terminateZeroPageHandle =  CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (terminateZeroPageHandle == INVALID_HANDLE_VALUE) {
-        fprintf(stderr, "failed to create event handle\n");
+        PRINT_ERROR("failed to create event handle\n");
     }
 
     HANDLE zeroPageHandle;
     zeroPageHandle = CreateThread(NULL, 0, zeroPageThread, terminateZeroPageHandle, 0, NULL);
 
     if (zeroPageHandle == INVALID_HANDLE_VALUE) {
-        fprintf(stderr, "failed to create zeroPage handle\n");
+        PRINT_ERROR("failed to create zeroPage handle\n");
     }
 
 
@@ -637,19 +684,19 @@ testRoutine()
     freePageTestHandle = CreateThread(NULL, 0, freePageTestThread, terminateZeroPageHandle, 0, NULL);
 
     if (freePageTestHandle == INVALID_HANDLE_VALUE) {
-        fprintf(stderr, "failed to create zeroPage handle\n");
+        PRINT_ERROR("failed to create zeroPage handle\n");
     }
     #endif
 
     // HANDLE zeroPageHandle2;
     // zeroPageHandle2 = CreateThread(NULL, 0, zeroPageThread, handles, 0, NULL);
     // if (zeroPageHandle == INVALID_HANDLE_VALUE) {
-    //     fprintf(stderr, "failed to create zeroPage handle\n");
+    //     PRINT_ERROR("failed to create zeroPage handle\n");
     // }
 
     #endif
 
-    printf("--------------------------------\n");
+    PRINT_ALWAYS("--------------------------------\n");
 
     // testVA = leafVABlock;
 
@@ -658,7 +705,7 @@ testRoutine()
     //     faultStatus testStatus = accessVA(testVA, READ_WRITE);  // to TEST VAs
     //     // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
     
-    //     printf("tested (VA = %d), return status = %u\n", (ULONG) testVA, testStatus);
+    //     PRINT("tested (VA = %d), return status = %u\n", (ULONG) testVA, testStatus);
     //     testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
     // }
 
@@ -679,7 +726,7 @@ testRoutine()
 
         faultStatus testStatus = pageFault(testVA, READ_WRITE);        // to TEST VAs
         // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
-        printf("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
+        PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
     }
 
@@ -690,8 +737,8 @@ testRoutine()
 
     for (int i = 0; i < testNum; i++) {
 
-        printf("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) testVA, * (ULONG_PTR*) testVA);
-        printf("decommiting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) testVA, * (PCHAR *) testVA);
+        PRINT("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) testVA, * (ULONG_PTR*) testVA);
+        PRINT("decommiting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) testVA, * (PCHAR *) testVA);
 
         decommitVA(testVA, 1);
 
@@ -716,6 +763,8 @@ testRoutine()
 VOID 
 main(int argc, char** argv) 
 {
+
+    /*********** switch to toggle verbosity (print statements) *************/
     if (argc > 1 && strcmp(argv[1], "-v") == 0) {
         debugMode = TRUE;
     }
@@ -739,14 +788,14 @@ main(int argc, char** argv)
     aPFNs = VirtualAlloc(NULL, NUM_PAGES*(sizeof(ULONG_PTR)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     
     if (aPFNs == NULL) {
-        fprintf(stderr, "failed to allocate PFNarray\n");
+        PRINT_ERROR("failed to allocate PFNarray\n");
     }
 
     // secure privilege for the code
     BOOLEAN privResult;
     privResult = getPrivilege();
     if (privResult != TRUE) {
-        fprintf(stderr, "could not get privilege successfully \n");
+        PRINT_ERROR("could not get privilege successfully \n");
         exit(-1);
     }    
 
@@ -755,12 +804,12 @@ main(int argc, char** argv)
     ULONG_PTR numPagesReturned = NUM_PAGES;
     bResult = AllocateUserPhysicalPages(GetCurrentProcess(), &numPagesReturned, aPFNs);
     if (bResult != TRUE) {
-        fprintf(stderr, "could not allocate pages successfully \n");
+        PRINT_ERROR("could not allocate pages successfully \n");
         exit(-1);
     }
 
     if (numPagesReturned != NUM_PAGES) {
-        fprintf(stderr, "allocated only %llu pages out of %u pages requested\n", numPagesReturned, NUM_PAGES);
+        PRINT("allocated only %llu pages out of %u pages requested\n", numPagesReturned, NUM_PAGES);
     }
 
     // create VAD
@@ -778,7 +827,7 @@ main(int argc, char** argv)
     // call test routine
     testRoutine();
 
-    printf("----------------\nprogram complete\n----------------");
+    PRINT_ALWAYS("----------------\nprogram complete\n----------------");
 
     //  free memory allocated
     VirtualFree(leafVABlock, 0, MEM_RELEASE);

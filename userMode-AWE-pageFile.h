@@ -12,6 +12,9 @@
 #define NUM_PAGES 512
 // #define NUM_PAGES 6400000
 
+// #define CHECK_PAGEFILE
+
+
 #define PTE_INDEX_BITS 9        // log2(NUM_PAGES)
 #define PAGE_SIZE 4096
 #define PAGE_SHIFT 12           // number of bits to multiply/divide by page size
@@ -23,6 +26,11 @@
 #define INVALID_PAGEFILE_INDEX 0xfffff // 20 bits (MUST CORRESPOND TO PAGEFILE BITS)
 
 #define ASSERT(x) if((x) == FALSE) DebugBreak()
+
+#define PRINT(fmt, ...) if (debugMode == TRUE) { printf(fmt, __VA_ARGS__); }                // verify this works
+#define PRINT_ERROR(fmt, ...) if (debugMode == TRUE) { fprintf(stderr, fmt, __VA_ARGS__); ASSERT(FALSE); }
+#define PRINT_ALWAYS(fmt, ...) printf(fmt, __VA_ARGS__)
+
 
 typedef struct _hardwarePTE{
     ULONG64 validBit: 1;            // valid bit MUST be set for hPTE format
@@ -112,6 +120,8 @@ typedef enum {
 /*
  *  GLOBAL VARIABLES
  */
+extern BOOLEAN debugMode;
+
 extern void* leafVABlock;                  // starting address of memory block
 extern void* leafVABlockEnd;               // ending address of memory block
 
@@ -241,6 +251,7 @@ zeroPageThread();
 
 /*
  * TODO (future): bump refcount and set read in progress bit
+ *  - must prevent from being accessed via PTE while being written out
  * 
  * modifiedPageWriter: function to pull a page off modified list and write to pagefile
  * - checks if rhere are any pages on modified list

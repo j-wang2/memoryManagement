@@ -68,7 +68,7 @@ writePage(PPFNdata PFNtoWrite)
     ULONG_PTR bitIndex;
     bitIndex = setPFBitIndex();
     if (bitIndex == INVALID_PAGEFILE_INDEX) {
-        fprintf(stderr, "no remaining space in pagefile - could not write out \n");
+        PRINT_ERROR("no remaining space in pagefile - could not write out \n");
         return FALSE;
     }
 
@@ -77,7 +77,7 @@ writePage(PPFNdata PFNtoWrite)
 
     // map given page to the modifiedWriteVA
     if (!MapUserPhysicalPages(modifiedWriteVA, 1, &PFN)) {
-        fprintf(stderr, "error mapping modifiedWriteVA\n");
+        PRINT_ERROR("error mapping modifiedWriteVA\n");
         return FALSE;
     }
 
@@ -90,9 +90,9 @@ writePage(PPFNdata PFNtoWrite)
 
     // unmap modifiedWriteVA from page
     if (!MapUserPhysicalPages(modifiedWriteVA, 1, NULL)) {
-        fprintf(stderr, "error unmapping modifiedWriteVA\n");
+        PRINT_ERROR("error unmapping modifiedWriteVA\n");
         return FALSE;
     }
-    printf("successfully wrote page to pagefile\n");
+    PRINT("successfully wrote page to pagefile\n");
     return TRUE;
 }

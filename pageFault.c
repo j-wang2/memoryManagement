@@ -14,7 +14,7 @@ validPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     PTEpermissions tempRWEpermissions = getPTEpermissions(snapPTE);
     if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {
 
-        fprintf(stderr, "Invalid permissions\n");
+        PRINT_ERROR("Invalid permissions\n");
         return ACCESS_VIOLATION;
 
     } 
@@ -38,7 +38,7 @@ validPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         * (volatile PTE *) masterPTE = snapPTE;
 
     }
-    printf("PFN is already valid\n");
+   PRINT("PFN is already valid\n");
     return SUCCESS;
 
 }
@@ -47,7 +47,7 @@ validPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 faultStatus
 transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 {
-    printf(" - trans page fault\n");
+   PRINT(" - trans page fault\n");
 
     // declare pageNum (PFN) ULONG
     ULONG_PTR pageNum;
@@ -59,7 +59,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     PTEpermissions transRWEpermissions = snapPTE.u1.tPTE.permissions;
     if (!checkPTEpermissions(transRWEpermissions, RWEpermissions)) {
 
-        fprintf(stderr, "Invalid permissions\n");
+        PRINT_ERROR("Invalid permissions\n");
         return ACCESS_VIOLATION;
 
     } 
@@ -69,7 +69,8 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     PPFNdata transitionPFN;
     transitionPFN = PFNarray + pageNum;
 
-    if (permissionMasks[RWEpermissions] & writeMask) { // if attempting to write, set dirty bit & clear PF location if it exists
+    // if attempting to write, set dirty bit & clear PF location if it exists (TODO multithreading)
+    if (permissionMasks[RWEpermissions] & writeMask) { 
 
         // set PTE to dirty
         newPTE.u1.hPTE.dirtyBit = 1;
@@ -128,7 +129,7 @@ faultStatus
 pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 {
 
-    printf(" - pf page fault\n");
+   PRINT(" - pf page fault\n");
 
     // declare pageNum (PFN) ULONG
     ULONG_PTR pageNum;
@@ -141,7 +142,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     PTEpermissions pageFileRWEpermissions = snapPTE.u1.pfPTE.permissions;
     if (!checkPTEpermissions(pageFileRWEpermissions, RWEpermissions)) {
 
-        fprintf(stderr, "Invalid permissions\n");
+        PRINT_ERROR("Invalid permissions\n");
         return ACCESS_VIOLATION;
 
     }
@@ -151,7 +152,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     PPFNdata freedPFN;
     freedPFN = getPage();
     if (freedPFN == NULL) {
-        fprintf(stderr, "failed to successfully dequeue PFN from freed list\n");
+        PRINT_ERROR("failed to successfully dequeue PFN from freed list\n");
         return NO_FREE_PAGES;
     }
 
@@ -163,7 +164,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     // map given page to the "zero" VA
     if (!MapUserPhysicalPages(pageFileFormatVA, 1, &pageNum)) {
-        fprintf(stderr, "error remapping pageFileFormatVA\n");
+        PRINT_ERROR("error remapping pageFileFormatVA\n");
         return FALSE;
     }
 
@@ -176,7 +177,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     // unmap pageFileFormatVA from page - PFN is now filled w contents from pagefile
     if (!MapUserPhysicalPages(pageFileFormatVA, 1, NULL)) {
-        fprintf(stderr, "error copying into page\n");
+        PRINT_ERROR("error copying into page\n");
         return FALSE;
     }
     
@@ -231,7 +232,7 @@ faultStatus
 demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 {
 
-    printf(" - dz page fault\n");
+   PRINT(" - dz page fault\n");
 
     // declare pageNum (PFN) ULONG
     ULONG_PTR pageNum;
@@ -243,7 +244,7 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     PTEpermissions dZeroRWEpermissions = snapPTE.u1.dzPTE.permissions;
     if (!checkPTEpermissions(dZeroRWEpermissions, RWEpermissions)) {
 
-        fprintf(stderr, "Invalid permissions\n");
+        PRINT_ERROR("Invalid permissions\n");
         return ACCESS_VIOLATION;
 
     } 
@@ -259,7 +260,7 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     freedPFN = getPage();
 
     if (freedPFN == NULL) {
-        fprintf(stderr, "failed to successfully dequeue PFN from freed list\n");
+        PRINT_ERROR("failed to successfully dequeue PFN from freed list\n");
         return NO_FREE_PAGES;
     }
 
@@ -294,13 +295,13 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     // assign VA to point at physical page, mirroring our local PTE change
     bresult = MapUserPhysicalPages(virtualAddress, 1, &pageNum);
     if (bresult != TRUE) {
-        fprintf(stderr, "[dz PageFault] Error mapping user physical pages\n");
+        PRINT_ERROR("[dz PageFault] Error mapping user physical pages\n");
     }
 
     // update physical permissions of hardware PTE to match our software reference.
     bresult = VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[dZeroRWEpermissions], &oldPermissions);
     if (bresult != TRUE) {
-        fprintf(stderr, "[dz PageFault] Error virtual protecting VA with permissions %u\n", dZeroRWEpermissions);
+        PRINT_ERROR("[dz PageFault] Error virtual protecting VA with permissions %u\n", dZeroRWEpermissions);
     }
 
     return SUCCESS;                                             // return value of 2; 
@@ -312,7 +313,7 @@ faultStatus
 pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 {
 
-    printf("pageFault\n");
+   PRINT("pageFault\n");
 
     // get the PTE from the VA
     PPTE currPTE;
@@ -355,13 +356,13 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     else if (oldPTE.u1.ulongPTE == 0) {                                 // ZERO STATE PTE
 
         // TODO (future): may need to check if vad is mem commit and bring in permissions
-        fprintf(stderr, "access violation - PTE is zero\n");
+        PRINT_ERROR("access violation - PTE is zero\n");
         return ACCESS_VIOLATION;
 
     }
 
     else {
-        fprintf(stderr, "ERROR - not in any recognized PTE state\n");
+        PRINT_ERROR("ERROR - not in any recognized PTE state\n");
         exit (-1);
     }
     

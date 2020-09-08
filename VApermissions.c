@@ -22,7 +22,7 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
 
             } else {
 
-                fprintf(stderr, "invalid permissions\n");    
+                PRINT_ERROR("invalid permissions\n");    
 
             }
 
@@ -70,7 +70,7 @@ isVAaccessible (PVOID virtualAddress, PTEpermissions RWEpermissions)
             *(volatile CHAR *)virtualAddress = *(volatile CHAR *)virtualAddress;                   // write
 
         }  else {
-            fprintf(stderr, "invalid permissions\n");
+            PRINT_ERROR("invalid permissions\n");
         }
         return SUCCESS;
     } _except (EXCEPTION_EXECUTE_HANDLER) {
@@ -98,7 +98,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
     // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
     if (tempPTE.u1.hPTE.validBit == 1 || tempPTE.u1.tPTE.transitionBit == 1 || tempPTE.u1.pfPTE.permissions != NO_ACCESS) {
-        printf("PTE is already valid, transition, or demand zero\n");
+        PRINT("PTE is already valid, transition, or demand zero\n");
         return FALSE;
     }
 
@@ -109,11 +109,11 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
         tempPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
         totalCommittedPages++;
-        printf("Committed VA at %llu with permissions %d\n", (ULONG_PTR) startVA, RWEpermissions);
+        PRINT("Committed VA at %llu with permissions %d\n", (ULONG_PTR) startVA, RWEpermissions);
     
     } else {
         // no remaining pages
-        fprintf(stderr, "no remaining pages\n");
+        PRINT_ERROR("no remaining pages\n");
         return FALSE;
     }
 
@@ -161,12 +161,12 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
     }
     else {
 
-        printf("PTE is not already valid, transition, or demand zero\n");
+        PRINT("PTE is not already valid, transition, or demand zero\n");
         return NO_ACCESS;
 
     }
 
-    printf("[protectVA] updated VA permissions\n");
+    PRINT("[protectVA] updated VA permissions\n");
 
     * (volatile PTE *) currPTE = tempPTE;
     return oldPermissions;
@@ -189,7 +189,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
     // check if PTE is already zeroed
     if (tempPTE.u1.ulongPTE == 0) {
-        fprintf(stderr, "VA is already decommitted\n");
+        PRINT_ERROR("VA is already decommitted\n");
         return FALSE;
     }
 
@@ -245,7 +245,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
     }
 
     else if (tempPTE.u1.ulongPTE == 0) {                            // zero PTE
-        fprintf(stderr, "already decommitted\n");
+        PRINT_ERROR("already decommitted\n");
         return TRUE;
     }
 
@@ -256,7 +256,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
     } else {
 
-        fprintf(stderr, "error - no committed pages\n");
+        PRINT_ERROR("error - no committed pages\n");
         return FALSE;
 
     }
