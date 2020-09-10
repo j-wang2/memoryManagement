@@ -94,7 +94,8 @@ typedef enum {
     FREE,               // 1
     STANDBY,            // 2
     MODIFIED,           // 3
-    ACTIVE,             // 4
+    QUARANTINE,         // 4
+    ACTIVE,             // 5
 } PFNstatus;
 
 typedef enum {
@@ -125,10 +126,13 @@ extern BOOLEAN debugMode;
 extern void* leafVABlock;                  // starting address of memory block
 extern void* leafVABlockEnd;               // ending address of memory block
 
-extern PPFNdata PFNarray;                  // starting address of PFN metadata array
+extern PPFNdata PFNarray;                  // starting address of PFN array
 extern PPTE PTEarray;                      // starting address of page table
 
 extern void* zeroVA;                       // specific VA used for zeroing PFNs (via AWE mapping)
+
+extern void* pageTradeDestVA;              // specific VA used for page trading destination
+extern void* pageTradeSourceVA;            // specific VA used for page trading source
 
 extern ULONG_PTR totalCommittedPages;      // count of committed pages (initialized to zero)
 extern ULONG_PTR totalMemoryPageLimit;     // limit of committed pages (memory block + pagefile space)
@@ -152,9 +156,10 @@ extern listData listHeads[ACTIVE];
 #define freeListHead listHeads[FREE]
 #define standbyListHead listHeads[STANDBY]
 #define modifiedListHead listHeads[MODIFIED]
+#define quarantineListHead listHeads[QUARANTINE]
 
 // toggle multithreading on and off
-#define MULTITHREADING
+// #define MULTITHREADING
 
 
 /*
@@ -250,8 +255,11 @@ DWORD WINAPI
 zeroPageThread();
 
 /*
- * TODO (future): bump refcount and set read in progress bit
+ * TODO (future): bump refcount and set write in progress bit in PFN
  *  - must prevent from being accessed via PTE while being written out
+ *  - write in progress
+ * 
+ * 
  * 
  * modifiedPageWriter: function to pull a page off modified list and write to pagefile
  * - checks if rhere are any pages on modified list

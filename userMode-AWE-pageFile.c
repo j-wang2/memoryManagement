@@ -23,6 +23,9 @@ PPTE PTEarray;                      // starting address of page table
 
 void* zeroVA;                       // specific VA used for zeroing PFNs (via AWE mapping)
 
+void* pageTradeDestVA;                  // specific VA used for page trading destination
+void* pageTradeSourceVA;                // specific VA used for page trading source
+
 ULONG_PTR totalCommittedPages;      // count of committed pages (initialized to zero)
 ULONG_PTR totalMemoryPageLimit = NUM_PAGES + PAGEFILE_SIZE / PAGE_SIZE;    // limit of committed pages (memory block + pagefile space)
 
@@ -595,11 +598,14 @@ testRoutine()
 
     ULONG_PTR testNum = 10;
     PRINT_ALWAYS("Committing and then faulting in %llu pages\n", testNum);
+
+    
     for (int i = 0; i < testNum; i++) {
+
         faultStatus testStatus;
 
         commitVA(testVA, READ_ONLY, 1);    // commits with READ_ONLY permissions
-        protectVA(testVA, READ_WRITE, 1);
+        protectVA(testVA, READ_WRITE, 1);   // converts to read write
 
         // commitVA(testVA, READ_WRITE, 1);    // commits with read/write permissions (VirtualProtect does not allow execute permissions)
     
@@ -613,6 +619,12 @@ testRoutine()
             testStatus = accessVA(testVA, READ_ONLY);
             
         }
+
+        /************ TRADING pages ***********/
+
+        PRINT("Attempting to trade VA\n");
+        tradeVA(testVA);
+
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
@@ -745,7 +757,7 @@ testRoutine()
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
     }
 
-
+    #ifdef MULTITHREADING
     SetEvent(terminateZeroPageHandle);
 
     WaitForSingleObject(zeroPageHandle, INFINITE);
@@ -753,6 +765,7 @@ testRoutine()
 
     #ifdef TESTING_ZERO
     WaitForSingleObject(freePageTestHandle, INFINITE);
+    #endif
     #endif
 
     // WaitForSingleObject(zeroPageHandle2, INFINITE);
@@ -773,6 +786,10 @@ main(int argc, char** argv)
 
     // reserve AWE address for zeroVA
     zeroVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+
+    pageTradeDestVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+    pageTradeSourceVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+
 
     // reserve AWE address for modifiedWriteVA 
     modifiedWriteVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);

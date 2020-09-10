@@ -313,7 +313,7 @@ faultStatus
 pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 {
 
-   PRINT("pageFault\n");
+   PRINT("[pageFault]");
 
     // get the PTE from the VA
     PPTE currPTE;
