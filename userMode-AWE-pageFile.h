@@ -134,7 +134,7 @@ extern void* leafVABlockEnd;               // ending address of memory block
 extern PPFNdata PFNarray;                  // starting address of PFN array
 extern PPTE PTEarray;                      // starting address of page table
 
-extern void* zeroVA;                       // specific VA used for zeroing PFNs (via AWE mapping)
+// extern void* zeroVA;                       // specific VA used for zeroing PFNs (via AWE mapping)
 
 extern void* pageTradeDestVA;              // specific VA used for page trading destination
 extern void* pageTradeSourceVA;            // specific VA used for page trading source
@@ -162,6 +162,8 @@ extern listData listHeads[ACTIVE];
 #define standbyListHead listHeads[STANDBY]
 #define modifiedListHead listHeads[MODIFIED]
 #define quarantineListHead listHeads[QUARANTINE]
+
+extern listData zeroVAListHead;             // list of zeroVAs used for zeroing PFNs (via AWE mapping)
 
 // toggle multithreading on and off
 #define MULTITHREADING

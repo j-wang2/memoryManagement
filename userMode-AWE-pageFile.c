@@ -21,7 +21,6 @@ void* leafVABlockEnd;               // ending address of memory block
 PPFNdata PFNarray;                  // starting address of PFN metadata array
 PPTE PTEarray;                      // starting address of page table
 
-void* zeroVA;                       // specific VA used for zeroing PFNs (via AWE mapping)
 
 void* pageTradeDestVA;                  // specific VA used for page trading destination
 void* pageTradeSourceVA;                // specific VA used for page trading source
@@ -39,7 +38,7 @@ ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask |
 
 listData listHeads[ACTIVE];         // intialization of listHeads array
 
-listData zeroVAListHead;
+listData zeroVAListHead;            // list of zeroVAs used for zeroing PFNs (via AWE mapping)
 
 BOOLEAN debugMode;
 
@@ -594,6 +593,64 @@ initListHeads(PlistData listHeadArray)
  
 
 VOID
+initZeroVAList(ULONG_PTR numVAs)
+{
+    if (numVAs < 1) {
+        PRINT_ERROR("[initZeroVAList] Cannot initialize list of zeroVAs with length 0\n");
+        exit (-1);
+    }
+
+    // initialize lock field
+    InitializeCriticalSection(&(zeroVAListHead.lock));
+
+    // initialize head
+    initLinkHead(&(zeroVAListHead.head));
+
+    zeroVAListHead.count = 0;
+
+    HANDLE newVAsHandle;
+    newVAsHandle =  CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    if (newVAsHandle == INVALID_HANDLE_VALUE) {
+        PRINT_ERROR("[initZeroVAList] failed to create event handle\n");
+        exit(-1);
+    }
+
+    zeroVAListHead.newPagesEvent = newVAsHandle;
+
+
+    // alloc for VAs
+    void* baseZeroVA;
+    baseZeroVA = VirtualAlloc(NULL, numVAs * PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+
+    // alloc for nodes
+    PVANode baseNode;
+    baseNode = VirtualAlloc(NULL, numVAs * sizeof(VANode), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+
+    PVANode currNode;
+    void* currVA;
+
+    // for each VA, allocate memory and link onto head
+
+    for (int i = 0; i < numVAs; i++) {
+
+        //get address of current node
+        currNode = baseNode + i;
+
+        // get address of current address
+        currVA = (void*) ( (ULONG_PTR)baseZeroVA + i*PAGE_SIZE );
+
+        currNode->VA = currVA;
+
+        // enqueue node to list
+        enqueueVA(&zeroVAListHead, currNode);
+    }
+
+    
+}
+
+
+VOID
 testRoutine()
 {
     PRINT_ALWAYS("[testRoutine]\n");
@@ -785,65 +842,6 @@ testRoutine()
 }
 
 
-VOID
-initZeroVAList(ULONG_PTR numVAs)
-{
-    if (numVAs < 1) {
-        PRINT_ERROR("[initZeroVAList] Cannot initialize list of zeroVAs with length 0\n");
-        exit (-1);
-    }
-
-    // initialize lock field
-    InitializeCriticalSection(&(zeroVAListHead.lock));
-
-    // initialize head
-    initLinkHead(&(zeroVAListHead.head));
-
-    zeroVAListHead.count = 0;
-
-    HANDLE newVAsHandle;
-    newVAsHandle =  CreateEvent(NULL, FALSE, FALSE, NULL);
-
-    if (newVAsHandle == INVALID_HANDLE_VALUE) {
-        PRINT_ERROR("[initZeroVAList] failed to create event handle\n");
-        exit(-1);
-    }
-
-    zeroVAListHead.newPagesEvent = newVAsHandle;
-
-
-    // alloc for VAs
-    void* baseZeroVA;
-    baseZeroVA = VirtualAlloc(NULL, numVAs * PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
-
-    // alloc for nodes
-    PVANode baseNode;
-    baseNode = VirtualAlloc(NULL, numVAs * sizeof(VANode), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-
-    PVANode currNode;
-    void* currVA;
-
-    // for each VA, allocate memory and link onto head
-
-    for (int i = 0; i < numVAs; i++) {
-
-        //get address of current node
-        currNode = baseNode + i;
-
-        // get address of current address
-        currVA = (void*) ( (ULONG_PTR)baseZeroVA + i*PAGE_SIZE );
-
-        currNode->VA = currVA;
-
-        // enqueue node to list
-        enqueueVA(&zeroVAListHead, currNode);
-    }
-
-    
-}
-
-
-
 VOID 
 main(int argc, char** argv) 
 {
@@ -853,15 +851,16 @@ main(int argc, char** argv)
         debugMode = TRUE;
     }
 
+    // initialize zero/free/standby.. lists
     initListHeads(listHeads);
 
-    // reserve AWE address for zeroVA
-    zeroVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+    // initialize zeroVAList, consisting of AWE addresses for zeroing pages
     initZeroVAList(3);
 
+
+    // reserve AWE addresses for page trading
     pageTradeDestVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
     pageTradeSourceVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
-
 
     // reserve AWE address for modifiedWriteVA 
     modifiedWriteVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);

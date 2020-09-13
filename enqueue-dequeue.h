@@ -82,11 +82,23 @@ VOID
 dequeueSpecificPage(PPFNdata removePage);
 
 
-
+/*
+ * dequeueVA: wrapper function for dequeue
+ *  - decrements count of VA list
+ * 
+ * Returns PVANode
+ *  - pointer to VANode struct on success
+ *  - NULL on failure
+ */
 PVANode
 dequeueVA(PlistData listHead);
 
-
+/*
+ * enqueueVA: wrapper function for enqueue
+ *  - increments count of VA list
+ * 
+ * No return value
+ */
 VOID
 enqueueVA(PlistData listHead, PVANode VANode);
 
