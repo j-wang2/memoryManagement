@@ -1,5 +1,25 @@
 #include "userMode-AWE-pageFile.h"
 
+VOID 
+checkAvailablePages(PFNstatus dequeuedStatus)
+{
+
+    // conditional covers zero, free, and standby (since they are smaller in the enum)
+    if (dequeuedStatus <= STANDBY){
+
+        // calculate available pages
+        ULONG_PTR availablePageCount;
+        availablePageCount = zeroListHead.count + freeListHead.count + standbyListHead.count;
+
+        if (availablePageCount < 10) {
+            modifiedPageWriter();               // TODO: need to check ret val?
+        }
+
+    }
+    
+}
+
+
 VOID
 enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem) 
 {
@@ -13,6 +33,7 @@ enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem)
 
     return; // should I haave a return value?
 }
+
 
 VOID
 enqueuePage(PlistData listHead, PPFNdata PFN)
@@ -39,7 +60,6 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
 }
 
 
-// TODO - add another state for "no longer on list"
 PPFNdata
 dequeuePage(PlistData listHead) 
 {
@@ -83,6 +103,8 @@ dequeuePage(PlistData listHead)
     LeaveCriticalSection(&(listHead->lock));
 
     returnPFN = CONTAINING_RECORD(returnLink, PFNdata, links);
+
+    checkAvailablePages(returnPFN->statusBits);
 
     return returnPFN;
 }
@@ -130,8 +152,10 @@ dequeuePageFromTail(PlistData listHead)
 
     // unlock listHead
     LeaveCriticalSection(&(listHead->lock));
-
+    
     returnPFN = CONTAINING_RECORD(returnLink, PFNdata, links);
+
+    checkAvailablePages(returnPFN->statusBits);
 
     return returnPFN;
 }
@@ -160,7 +184,85 @@ dequeueSpecificPage(PPFNdata removePage)
 {
     dequeueSpecific( &(removePage->links) );
 
+    EnterCriticalSection(&(listHeads[removePage->statusBits].lock));
+
     // decrement count for that list
     listHeads[removePage->statusBits].count--;
+
+    LeaveCriticalSection(&(listHeads[removePage->statusBits].lock));
+
+    checkAvailablePages(removePage->statusBits);
+
+}
+
+
+PVANode
+dequeueVA(PlistData listHead)
+{
+    
+    PLIST_ENTRY headLink;
+    headLink = &(listHead->head);
+
+    //lock listHead (since listHead values are not changed/accessed until dereferenced)
+    EnterCriticalSection(&(listHead->lock));
+
+    // verify list has items chained to the head
+    if (headLink->Flink == headLink) {
+        ASSERT(listHead->count == 0);
+
+        // unlock listHead
+        LeaveCriticalSection(&(listHead->lock));
+
+        return NULL;
+    }
+
+    ASSERT(listHead->count != 0);
+
+    PVANode returnVANode;
+    PLIST_ENTRY returnLink;
+    PLIST_ENTRY newFirst;
+    returnLink = headLink->Flink;
+    newFirst = returnLink->Flink;
+
+    // set headLink's flink to the return item's flink
+    headLink->Flink = newFirst;
+    newFirst->Blink = headLink;
+
+    // set returnLink's flink/blink to null before returning it
+    returnLink->Flink = NULL;
+    returnLink->Blink = NULL;
+
+    // decrement count
+    listHead->count--;
+
+    // unlock listHead
+    LeaveCriticalSection(&(listHead->lock));
+
+    returnVANode = CONTAINING_RECORD(returnLink, VANode, links);
+
+    return returnVANode;
+
+}
+
+
+VOID
+enqueueVA(PlistData listHead, PVANode VANode)
+{
+
+    //lock listHead (since listHead values are not changed/accessed until dereferenced)
+    EnterCriticalSection(&(listHead->lock));
+
+    // enqueue onto list
+    enqueue( &(listHead->head), &(VANode->links) );
+
+    // update pagecount of that list
+    listHead->count++;
+
+    #ifdef MULTITHREADING
+    SetEvent(listHead->newPagesEvent);
+    #endif
+
+    // unlock listHead
+    LeaveCriticalSection(&(listHead->lock));
 
 }

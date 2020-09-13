@@ -39,11 +39,11 @@ ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask |
 
 listData listHeads[ACTIVE];         // intialization of listHeads array
 
+listData zeroVAListHead;
+
 BOOLEAN debugMode;
 
 #define TESTING_ZERO
-
-
 
 
 PPTE
@@ -320,6 +320,16 @@ BOOLEAN
 zeroPage(ULONG_PTR PFN)
 {
 
+    PVANode zeroVANode;
+    zeroVANode = dequeueVA(&zeroVAListHead);
+
+    if (zeroVANode == NULL) {
+        PRINT("TODO: waiting for release\n");
+    }
+
+    PVOID zeroVA;
+    zeroVA = zeroVANode->VA;
+
     // map given page to the "zero" VA
     if (!MapUserPhysicalPages(zeroVA, 1, &PFN)) {
         PRINT_ERROR("error remapping zeroVA\n");
@@ -333,6 +343,8 @@ zeroPage(ULONG_PTR PFN)
         PRINT_ERROR("error zeroing page\n");
         return FALSE;
     }
+
+    enqueueVA(&zeroVAListHead, zeroVANode);
 
     return TRUE;
 }
@@ -599,7 +611,7 @@ testRoutine()
     ULONG_PTR testNum = 10;
     PRINT_ALWAYS("Committing and then faulting in %llu pages\n", testNum);
 
-    
+
     for (int i = 0; i < testNum; i++) {
 
         faultStatus testStatus;
@@ -622,8 +634,8 @@ testRoutine()
 
         /************ TRADING pages ***********/
 
-        PRINT("Attempting to trade VA\n");
-        tradeVA(testVA);
+        // PRINT("Attempting to trade VA\n");
+        // tradeVA(testVA);
 
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
@@ -773,6 +785,65 @@ testRoutine()
 }
 
 
+VOID
+initZeroVAList(ULONG_PTR numVAs)
+{
+    if (numVAs < 1) {
+        PRINT_ERROR("[initZeroVAList] Cannot initialize list of zeroVAs with length 0\n");
+        exit (-1);
+    }
+
+    // initialize lock field
+    InitializeCriticalSection(&(zeroVAListHead.lock));
+
+    // initialize head
+    initLinkHead(&(zeroVAListHead.head));
+
+    zeroVAListHead.count = 0;
+
+    HANDLE newVAsHandle;
+    newVAsHandle =  CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    if (newVAsHandle == INVALID_HANDLE_VALUE) {
+        PRINT_ERROR("[initZeroVAList] failed to create event handle\n");
+        exit(-1);
+    }
+
+    zeroVAListHead.newPagesEvent = newVAsHandle;
+
+
+    // alloc for VAs
+    void* baseZeroVA;
+    baseZeroVA = VirtualAlloc(NULL, numVAs * PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+
+    // alloc for nodes
+    PVANode baseNode;
+    baseNode = VirtualAlloc(NULL, numVAs * sizeof(VANode), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+
+    PVANode currNode;
+    void* currVA;
+
+    // for each VA, allocate memory and link onto head
+
+    for (int i = 0; i < numVAs; i++) {
+
+        //get address of current node
+        currNode = baseNode + i;
+
+        // get address of current address
+        currVA = (void*) ( (ULONG_PTR)baseZeroVA + i*PAGE_SIZE );
+
+        currNode->VA = currVA;
+
+        // enqueue node to list
+        enqueueVA(&zeroVAListHead, currNode);
+    }
+
+    
+}
+
+
+
 VOID 
 main(int argc, char** argv) 
 {
@@ -786,6 +857,7 @@ main(int argc, char** argv)
 
     // reserve AWE address for zeroVA
     zeroVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+    initZeroVAList(3);
 
     pageTradeDestVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
     pageTradeSourceVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);

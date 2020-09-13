@@ -11,7 +11,7 @@ getZeroPage()
         returnPFN = dequeuePage(&zeroListHead);
 
         if (returnPFN == NULL) {
-            PRINT_ERROR("Error in getPage(): unable to pull page off free\n");
+            PRINT("[getPage] zero list empty\n");
             return NULL;
         }
 
@@ -33,7 +33,8 @@ getFreePage()
         returnPFN = dequeuePage(&freeListHead);
 
         if (returnPFN == NULL) {
-            PRINT_ERROR("Error in getPage(): unable to pull page off free\n");
+            PRINT("[getPage] free list empty\n");
+
             return NULL;
         }
 
@@ -57,7 +58,8 @@ getStandbyPage()
         returnPFN = dequeuePageFromTail(&standbyListHead);
 
         if (returnPFN == NULL) {
-            PRINT_ERROR("Error in getPage(): unable to pull page off standby\n");
+            PRINT("[getPage] standby list empty\n");
+
             return NULL;
         }
 
@@ -131,7 +133,7 @@ getPage()
         // set PF offset to our "null" value in the PFN metadata
         returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
-        PRINT("Allocated PFN from standby list\n");
+        PRINT("[getPage] Allocated PFN from standby list\n");
 
         return returnPFN;   
     }
@@ -145,7 +147,7 @@ getPage()
         // set PF offset to our "null" value in the PFN metadata
         returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
-        PRINT("Allocated PFN from zero list\n");
+        PRINT("[getPage] Allocated PFN from zero list\n");
 
         return returnPFN;
 
@@ -164,7 +166,7 @@ getPage()
         // set PF offset to our "null" value in the PFN metadata
         returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
-        PRINT("Allocated PFN from free list\n");
+        PRINT("[getPage] Allocated PFN from free list\n");
 
         return returnPFN;
     }
@@ -182,7 +184,7 @@ getPage()
         // set PF offset to our "null" value in the PFN metadata
         returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
-        PRINT("Allocated PFN from standby list\n");
+        PRINT("[getPage] Allocated PFN from standby list\n");
 
         return returnPFN;   
     }

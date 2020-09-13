@@ -12,7 +12,7 @@
 #define NUM_PAGES 512
 // #define NUM_PAGES 6400000
 
-// #define CHECK_PAGEFILE
+#define CHECK_PAGEFILE
 
 
 #define PTE_INDEX_BITS 9        // log2(NUM_PAGES)
@@ -89,7 +89,12 @@ typedef struct _listData {
     HANDLE newPagesEvent;
 } listData, *PlistData;
 
-typedef enum {
+typedef struct _VANode {
+    LIST_ENTRY links;
+    PVOID VA;
+} VANode, *PVANode;
+
+typedef enum {          // DO NOT EDIT ORDER without checking enqueue/dequeue
     ZERO,               // 0
     FREE,               // 1
     STANDBY,            // 2
@@ -159,7 +164,7 @@ extern listData listHeads[ACTIVE];
 #define quarantineListHead listHeads[QUARANTINE]
 
 // toggle multithreading on and off
-// #define MULTITHREADING
+#define MULTITHREADING
 
 
 /*

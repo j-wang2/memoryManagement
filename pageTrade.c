@@ -16,8 +16,8 @@ tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)
     // sets status bits also
     enqueuePage(&quarantineListHead, pageToTrade);
 
-    // TODO - need to get a new page to replace with
-
+    // increment commit count, since this page is now out of circulation
+    totalCommittedPages++;
 
 }
 
@@ -84,11 +84,9 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     // update PTE's PFN field
     PPTE currPTE;
     currPTE = PTEarray + pageToTrade->PTEindex;
-
     currPTE->u1.tPTE.PFN = newPFN;
 
-    // TODO: update PFN's PTE index
-
+    // update PFN metadata with new PTE index
     ULONG64 PTEindex;
     PTEindex = currPTE - PTEarray;
     newPage->PTEindex = PTEindex;
@@ -96,42 +94,18 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     // sets status bits
     enqueuePage(&quarantineListHead, pageToTrade);
 
+    // increment commit count, since this page is now out of circulation (in addition to the one that is just brought in)
+    totalCommittedPages++;
+
 }
 
-
+/*
 VOID
 tradeActivePage(ULONG_PTR PFNtoTrade)
 {
-    PPFNdata pageToTrade;
-    pageToTrade = PFNarray + PFNtoTrade;
 
-    PFNstatus currStatus;
-    currStatus = pageToTrade->statusBits;
-
-    PPFNdata newPage;
-    newPage = getPage();          // TODO - need to be able to specify preference for freed page, rather than zeroed in params to getpage
-
-    ULONG_PTR newPFN;
-    newPFN = newPage - PFNarray;
-
-    copyPage(newPFN, PFNtoTrade);
-
-    newPage->statusBits = ACTIVE;
-
-    // update PTE's PFN field
-    PPTE currPTE;
-    currPTE = PTEarray + pageToTrade->PTEindex;
-
-    currPTE->u1.tPTE.PFN = newPFN;
-
-    // TODO: update PFN's PTE index
-    ULONG64 PTEindex;
-    PTEindex = currPTE - PTEarray;
-    newPage->PTEindex = PTEindex;
-
-    // sets status bits
-    enqueuePage(&quarantineListHead, pageToTrade);
 }
+*/
 
 BOOLEAN
 tradeVA(PVOID virtualAddress)
@@ -149,8 +123,6 @@ tradeVA(PVOID virtualAddress)
 
     if (snapPTE.u1.hPTE.validBit == 1){
         trimPage(virtualAddress);
-        // tradeActivePage(snapPTE.u1.hPTE.PFN);
-        // return TRUE;
     }
     if (snapPTE.u1.tPTE.transitionBit == 1) {
         tradeTransitionPage(snapPTE.u1.hPTE.PFN);
