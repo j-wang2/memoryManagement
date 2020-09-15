@@ -9,29 +9,35 @@
 #include <windows.h>
 #pragma comment(lib, "Advapi32.lib")
 
+
+#define NUM_ZERO_THREADS 3
+
+
 #define NUM_PAGES 512
 // #define NUM_PAGES 6400000
 
-#define CHECK_PAGEFILE
+// #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
 
 
-#define PTE_INDEX_BITS 9        // log2(NUM_PAGES)
-#define PAGE_SIZE 4096
-#define PAGE_SHIFT 12           // number of bits to multiply/divide by page size
-#define PFN_BITS 40
+#define PTE_INDEX_BITS 9                            // log2(NUM_PAGES)
+#define PAGE_SIZE 4096                              // page size
+#define PAGE_SHIFT 12                               // number of bits to multiply/divide by page size
+#define PFN_BITS 40                                 // number of bits to store PFN index
 
-#define PAGEFILE_PAGES 512
-#define PAGEFILE_SIZE PAGEFILE_PAGES*PAGE_SIZE    // 
-#define PAGEFILE_BITS 20 // actually 2^19 currently
-#define INVALID_PAGEFILE_INDEX 0xfffff // 20 bits (MUST CORRESPOND TO PAGEFILE BITS)
+#define PAGEFILE_PAGES 512                          // capacity of pagefile pages
+#define PAGEFILE_SIZE PAGEFILE_PAGES*PAGE_SIZE      // total pagefile size 
+#define PAGEFILE_BITS 20                            // actually 2^19 currently
+#define INVALID_PAGEFILE_INDEX 0xfffff              // 20 bits (MUST CORRESPOND TO PAGEFILE BITS)
 
 #define ASSERT(x) if((x) == FALSE) DebugBreak()
 
+/***************** print macros ******************/
 #define PRINT(fmt, ...) if (debugMode == TRUE) { printf(fmt, __VA_ARGS__); }                // verify this works
 #define PRINT_ERROR(fmt, ...) if (debugMode == TRUE) { fprintf(stderr, fmt, __VA_ARGS__); ASSERT(FALSE); }
 #define PRINT_ALWAYS(fmt, ...) printf(fmt, __VA_ARGS__)
 
 
+/***************** STRUCT definitions **************/
 typedef struct _hardwarePTE{
     ULONG64 validBit: 1;            // valid bit MUST be set for hPTE format
     ULONG64 writeBit: 1;            // read if 0, write if 1
@@ -94,6 +100,8 @@ typedef struct _VANode {
     PVOID VA;
 } VANode, *PVANode;
 
+
+/*********** ENUM definitions ************/
 typedef enum {          // DO NOT EDIT ORDER without checking enqueue/dequeue
     ZERO,               // 0
     FREE,               // 1
@@ -123,9 +131,8 @@ typedef enum {
     WRITE,              // 1
 } readWrite;
 
-/*
- *  GLOBAL VARIABLES
- */
+
+/**************  GLOBAL VARIABLES  *************/
 extern BOOLEAN debugMode;
 
 extern void* leafVABlock;                  // starting address of memory block

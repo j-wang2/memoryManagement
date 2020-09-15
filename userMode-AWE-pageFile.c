@@ -481,21 +481,22 @@ modifiedPageWriter()
 {
 
 
-    PRINT("modifiedListCount == %llu\n", modifiedListHead.count);
+    PRINT("[modifiedPageWriter] modifiedListCount == %llu\n", modifiedListHead.count);
     PPFNdata PFNtoWrite;
     PFNtoWrite = dequeuePage(&modifiedListHead);
 
     if (PFNtoWrite == NULL) {
-        PRINT("modified list empty - could not write out\n");
+        PRINT("[modifiedPageWriter] modified list empty - could not write out\n");
         return FALSE;
     }
 
-
+                ///  TODO may need to improve backtracking
     BOOLEAN bResult;
     bResult = writePage(PFNtoWrite);
 
     if (bResult != TRUE) {
-        PRINT_ERROR("error writing out page\n");
+        PRINT_ERROR("[modifiedPageWriter] error writing out page\n");
+        enqueuePage(&modifiedListHead, PFNtoWrite);                     // TODO - CHECK (reenqueing if unable to write)
         return FALSE;
     }
 
@@ -677,22 +678,23 @@ testRoutine()
         protectVA(testVA, READ_WRITE, 1);   // converts to read write
 
         // commitVA(testVA, READ_WRITE, 1);    // commits with read/write permissions (VirtualProtect does not allow execute permissions)
+        testStatus = writeVA(testVA, testVA);
     
-        if (i % 2 == 1) {
+        // if (i % 2 == 1) {
 
-            // write VA to the VA location (should remain same throughout entire course of program despite physical page changes)
-            testStatus = writeVA(testVA, testVA);
+        //     // write VA to the VA location (should remain same throughout entire course of program despite physical page changes)
+        //     testStatus = writeVA(testVA, testVA);
 
-        } else {
+        // } else {
 
-            testStatus = accessVA(testVA, READ_ONLY);
+        //     testStatus = accessVA(testVA, READ_ONLY);
             
-        }
+        // }
 
         /************ TRADING pages ***********/
 
         // PRINT("Attempting to trade VA\n");
-        // tradeVA(testVA);
+        tradeVA(testVA);
 
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
@@ -750,11 +752,16 @@ testRoutine()
         PRINT_ERROR("failed to create event handle\n");
     }
 
-    HANDLE zeroPageHandle;
-    zeroPageHandle = CreateThread(NULL, 0, zeroPageThread, terminateZeroPageHandle, 0, NULL);
 
-    if (zeroPageHandle == INVALID_HANDLE_VALUE) {
-        PRINT_ERROR("failed to create zeroPage handle\n");
+    HANDLE zeroPageThreadHandles[NUM_ZERO_THREADS];
+    for (int i = 0; i < NUM_ZERO_THREADS; i++) {
+
+        zeroPageThreadHandles[i] = CreateThread(NULL, 0, zeroPageThread, terminateZeroPageHandle, 0, NULL);
+            
+        if (zeroPageThreadHandles[i] == INVALID_HANDLE_VALUE) {
+            PRINT_ERROR("failed to create zeroPage handle\n");
+        }
+  
     }
 
 
@@ -769,11 +776,6 @@ testRoutine()
     }
     #endif
 
-    // HANDLE zeroPageHandle2;
-    // zeroPageHandle2 = CreateThread(NULL, 0, zeroPageThread, handles, 0, NULL);
-    // if (zeroPageHandle == INVALID_HANDLE_VALUE) {
-    //     PRINT_ERROR("failed to create zeroPage handle\n");
-    // }
 
     #endif
 
@@ -799,7 +801,7 @@ testRoutine()
         // trimPage(testVA);
 
         #ifdef CHECK_PAGEFILE
-        // to test PF fault - switch order in getPage and add this
+        // "leaks" pages in order to force standby->pf repurposing
         for (int j = 0; j < 3; j++) {
             getPage();
         }
@@ -827,17 +829,17 @@ testRoutine()
     }
 
     #ifdef MULTITHREADING
+
     SetEvent(terminateZeroPageHandle);
 
-    WaitForSingleObject(zeroPageHandle, INFINITE);
-
+    WaitForMultipleObjects(NUM_ZERO_THREADS, zeroPageThreadHandles, TRUE, INFINITE);
 
     #ifdef TESTING_ZERO
     WaitForSingleObject(freePageTestHandle, INFINITE);
     #endif
+
     #endif
 
-    // WaitForSingleObject(zeroPageHandle2, INFINITE);
 
 }
 
@@ -851,11 +853,11 @@ main(int argc, char** argv)
         debugMode = TRUE;
     }
 
-    // initialize zero/free/standby.. lists
+    // initialize zero/free/standby.. lists 
     initListHeads(listHeads);
 
     // initialize zeroVAList, consisting of AWE addresses for zeroing pages
-    initZeroVAList(3);
+    initZeroVAList(NUM_ZERO_THREADS + 3);
 
 
     // reserve AWE addresses for page trading

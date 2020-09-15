@@ -245,18 +245,18 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
     }
 
     else if (tempPTE.u1.ulongPTE == 0) {                            // zero PTE
-        PRINT_ERROR("already decommitted\n");
+        PRINT_ERROR("[decommitVA] already decommitted\n");
         return TRUE;
     }
 
     // decrement count of committed pages
-    if (totalCommittedPages != 0)  {
+    if (totalCommittedPages > 0)  {
 
         totalCommittedPages--;
 
     } else {
 
-        PRINT_ERROR("error - no committed pages\n");
+        PRINT_ERROR("[decommitVA] bookkeeping error - no committed pages\n");
         return FALSE;
 
     }

@@ -91,6 +91,9 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     PTEindex = currPTE - PTEarray;
     newPage->PTEindex = PTEindex;
 
+    newPage->pageFileOffset = pageToTrade->pageFileOffset;
+    newPage->refCount = pageToTrade->refCount;         
+
     // sets status bits
     enqueuePage(&quarantineListHead, pageToTrade);
 

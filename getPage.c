@@ -75,7 +75,8 @@ getStandbyPage()
         PTE newPTE;
         newPTE.u1.ulongPTE = 0;
 
-        // if page is not already in pagefile, it MUST be a zero page (i.e. faulted into active but never written, then trimmed to standby)
+        // if page is not already in pagefile, it MUST be a zero page 
+        // (i.e. faulted into active but never written, then trimmed to standby)
         // Therefore, the PTE can be set to demand zero 
         if (returnPFN->pageFileOffset == INVALID_PAGEFILE_INDEX) {
 
@@ -119,7 +120,7 @@ getPage()
 
     PPFNdata returnPFN;
 
-#ifdef CHECK_PAGEFILE
+    #ifdef CHECK_PAGEFILE                               // to check standby -> pf repurposing
     // standby list
     returnPFN = getStandbyPage();
     if (returnPFN != NULL) {
@@ -137,7 +138,7 @@ getPage()
 
         return returnPFN;   
     }
-#endif
+    #endif
 
 
     // Zero list
@@ -152,6 +153,7 @@ getPage()
         return returnPFN;
 
     }
+
 
     // free list
     returnPFN = getFreePage();
@@ -191,6 +193,7 @@ getPage()
 
 
     PRINT_ERROR("All lists empty - unable to get page\n");      // TODO - needs to be handled to avoid deadlock
+    
     return returnPFN;                                           // should be NULL
 
 }

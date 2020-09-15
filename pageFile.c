@@ -37,6 +37,7 @@ setPFBitIndex()
     return INVALID_PAGEFILE_INDEX;
 }
 
+
 VOID
 clearPFBitIndex(ULONG_PTR pfVA) 
 {
@@ -68,16 +69,14 @@ writePage(PPFNdata PFNtoWrite)
     ULONG_PTR bitIndex;
     bitIndex = setPFBitIndex();
     if (bitIndex == INVALID_PAGEFILE_INDEX) {
-        PRINT_ERROR("no remaining space in pagefile - could not write out \n");
+        PRINT_ERROR("no remaining space in pagefile - could not write out\n");
         return FALSE;
     }
-
-    // add/update pageFileOffset field of PFN
-    PFNtoWrite->pageFileOffset = bitIndex;
 
     // map given page to the modifiedWriteVA
     if (!MapUserPhysicalPages(modifiedWriteVA, 1, &PFN)) {
         PRINT_ERROR("error mapping modifiedWriteVA\n");
+        clearPFBitIndex(bitIndex);
         return FALSE;
     }
 
@@ -91,8 +90,14 @@ writePage(PPFNdata PFNtoWrite)
     // unmap modifiedWriteVA from page
     if (!MapUserPhysicalPages(modifiedWriteVA, 1, NULL)) {
         PRINT_ERROR("error unmapping modifiedWriteVA\n");
+        clearPFBitIndex(bitIndex);                      // TODO - does order matter here?
         return FALSE;
     }
+
+    // add/update pageFileOffset field of PFN
+    // ONLY updates if the mapuserphysical pages calls are also successful
+    PFNtoWrite->pageFileOffset = bitIndex;
+
     PRINT("successfully wrote page to pagefile\n");
     return TRUE;
 }

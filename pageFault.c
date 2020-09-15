@@ -81,6 +81,16 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         // clear pagefile pointer out of PFN
         transitionPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
+    } else {
+
+        PPFNdata metadata;
+        metadata = PFNarray + pageNum;
+        
+        // if PFN is modified, maintain dirty bit when switched back
+        if (metadata->statusBits == MODIFIED) {
+            newPTE.u1.hPTE.dirtyBit = 1;
+        }
+        
     }
 
     // copy permissions from transition PTE into our soon-to-be-active PTE
