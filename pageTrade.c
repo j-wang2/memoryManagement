@@ -56,7 +56,7 @@ copyPage(ULONG_PTR dest, ULONG_PTR src)
 }
 
 
-VOID
+BOOLEAN
 tradeTransitionPage(ULONG_PTR PFNtoTrade)
 {
 
@@ -76,7 +76,15 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     ULONG_PTR newPFN;
     newPFN = newPage - PFNarray;
 
-    copyPage(newPFN, PFNtoTrade);
+
+    BOOLEAN copyRes;
+    copyRes = copyPage(newPFN, PFNtoTrade);
+
+    if (copyRes == FALSE) {
+        PRINT_ERROR("[tradeTransitionPage] error in page copying\n");
+        return FALSE;
+    }
+
 
     // enqueue replacement page onto list
     enqueuePage(&listHeads[currStatus], newPage);
@@ -100,15 +108,10 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     // increment commit count, since this page is now out of circulation (in addition to the one that is just brought in)
     totalCommittedPages++;
 
-}
-
-/*
-VOID
-tradeActivePage(ULONG_PTR PFNtoTrade)
-{
+    return TRUE;
 
 }
-*/
+
 
 BOOLEAN
 tradeVA(PVOID virtualAddress)
@@ -124,19 +127,48 @@ tradeVA(PVOID virtualAddress)
     PTE snapPTE;
     snapPTE = *currPTE;
 
-    if (snapPTE.u1.hPTE.validBit == 1){
-        trimPage(virtualAddress);
-    }
-    if (snapPTE.u1.tPTE.transitionBit == 1) {
-        tradeTransitionPage(snapPTE.u1.hPTE.PFN);
+    ULONG_PTR originalValidBit;
+    originalValidBit = snapPTE.u1.hPTE.validBit;
 
-        if (snapPTE.u1.hPTE.validBit == 1) {
+
+    if (snapPTE.u1.hPTE.validBit == 1){
+
+        BOOLEAN tResult;
+        tResult = trimPage(virtualAddress);         // TODO: possible multithreading issues
+
+        if (tResult == FALSE) {
+            PRINT_ERROR("[pageTrade] unable to trimPage at VA %llu\n", (ULONG_PTR) virtualAddress);
+            return FALSE;
+        }
+
+    }
+
+    // resnap PTE 
+    snapPTE = *currPTE;
+
+    if (snapPTE.u1.tPTE.transitionBit == 1) {
+
+        BOOLEAN tResult;
+        tResult = tradeTransitionPage(snapPTE.u1.tPTE.PFN);
+
+        if (tResult == FALSE) {
+            PRINT_ERROR("[tradeVA] unable to trade transition page\n");
+            return FALSE;
+        }
+
+        pageFault(virtualAddress, READ_ONLY);
+
+        if (originalValidBit) {
+
             pageFault(virtualAddress, READ_ONLY);
+
         }
         return TRUE;
     }
+
     else {
         // no page associated
+        PRINT_ERROR("[tradeVA] Address not mapped to page\n");
         return FALSE;
     }
 }

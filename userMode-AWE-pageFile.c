@@ -693,7 +693,7 @@ testRoutine()
 
         /************ TRADING pages ***********/
 
-        // PRINT("Attempting to trade VA\n");
+        PRINT("Attempting to trade VA\n");
         tradeVA(testVA);
 
 
