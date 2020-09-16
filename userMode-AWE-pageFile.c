@@ -217,42 +217,43 @@ LoggedSetLockPagesPrivilege ( HANDLE hProcess,
 BOOLEAN
 getPrivilege ()
 {
-    return LoggedSetLockPagesPrivilege( GetCurrentProcess(), TRUE );
+    BOOLEAN bResult;
+    bResult = (BOOLEAN) LoggedSetLockPagesPrivilege( GetCurrentProcess(), TRUE );
+    return bResult;
 }
 
 
-PVOID 
-initVABlock(int numPages, int pageSize)
+VOID 
+initVABlock(ULONG_PTR numPages, ULONG_PTR pageSize)
 {
-    // initialize block of "memory" for use by program
-    void* leafVABlock;
 
-    // creates a VAD node that we can define
-    leafVABlock = VirtualAlloc(NULL, NUM_PAGES*PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+    // creates a VAD node that we can define (i.e. is not pagefaulted by underlying kernel mm)
+    leafVABlock = VirtualAlloc(NULL, numPages*pageSize, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
 
     if (leafVABlock == NULL) {
         exit(-1);
     }
 
     leafVABlockEnd = (PVOID) ( (ULONG_PTR)leafVABlock + NUM_PAGES*PAGE_SIZE );
-    return leafVABlock;
+
 }
 
 
-PPFNdata
-initPFNarray(PULONG_PTR aPFNs, int numPages, int pageSize)
+VOID
+initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
 {
 
     PVOID commitCheckVA; 
     ULONG_PTR maxPFN = 0;
+
+    // loop through aPFNs array (from AllocateUserPhysicalPages) to find largest numerical PFN
     for (int i = 0; i < numPages; i++) {
         if (maxPFN < aPFNs[i]) {
             maxPFN = aPFNs[i];
         }
     }
 
-    // initialize PFN metadata array
-    PPFNdata PFNarray;
+    // VirtualAlloc (with MEM_RESERVE) PFN metadata array
     PFNarray = VirtualAlloc(NULL, (maxPFN+1)*(sizeof(PFNdata)), MEM_RESERVE, PAGE_READWRITE);
 
     if (PFNarray == NULL) {
@@ -260,7 +261,7 @@ initPFNarray(PULONG_PTR aPFNs, int numPages, int pageSize)
         exit(-1);
     }
 
-    // loop through all PFNs, MEM_COMMITTING PFN metadata subsections for each in the aPFNs array
+    // loop through all PFNs, MEM_COMMITTING PFN subsections and enqueueing to free for each page
     for (int i = 0; i < numPages; i++){
         PPFNdata newPFN;
         newPFN = PFNarray + aPFNs[i];
@@ -273,45 +274,42 @@ initPFNarray(PULONG_PTR aPFNs, int numPages, int pageSize)
 
         // increment committed page count
         totalCommittedPages++; 
-    }
-    
-    // add all pages to freed list - can be combined with previous for loop
-    for (int i = 0; i < numPages; i++) {
 
-        PPFNdata currPFN = PFNarray + aPFNs[i];
-
-        enqueuePage(&freeListHead, currPFN);       
+        // add page to free list
+        enqueuePage(&freeListHead, newPFN);       
 
     }
 
-    return PFNarray;
 }
 
 
-PPTE
-initPTEarray(int numPages, int pageSize)
+VOID
+initPTEarray(ULONG_PTR numPages)
 {    
-    // initialize PTE array
-    PPTE PTEarray;
-    PTEarray = VirtualAlloc(NULL, NUM_PAGES*(sizeof(PTE)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+    // VirtualAlloc (with MEM_RESERVE | MEM_COMMIT) for PTE array
+    PTEarray = VirtualAlloc(NULL, numPages*(sizeof(PTE)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
     if (PTEarray == NULL) {
         PRINT_ERROR("Could not allocate for PTEarray\n");
         exit(-1);
     }
-    return PTEarray;
+
 }
 
 
-PVOID
-initPageFile(int diskSize) 
+VOID
+initPageFile(ULONG_PTR diskSize) 
 {
-    void* pageFileAddress;
-    pageFileAddress = VirtualAlloc(NULL, diskSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (pageFileAddress == NULL) {
+
+    // VirtualAlloc (with MEM_RESERVE | MEM_COMMIT) for pageFileVABlock
+    pageFileVABlock = VirtualAlloc(NULL, diskSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+    if (pageFileVABlock == NULL) {
         PRINT_ERROR("Could not allocate for pageFile\n");
         exit(-1);
     }
-    return pageFileAddress;
+
 }
 
 
@@ -483,7 +481,10 @@ modifiedPageWriter()
 
     PRINT("[modifiedPageWriter] modifiedListCount == %llu\n", modifiedListHead.count);
     PPFNdata PFNtoWrite;
+
+    // PFNtoWrite->writeInProgressBit = 1;     // TODO - needs to be changed
     PFNtoWrite = dequeuePage(&modifiedListHead);
+
 
     if (PFNtoWrite == NULL) {
         PRINT("[modifiedPageWriter] modified list empty - could not write out\n");
@@ -525,7 +526,7 @@ modifiedPageThread(HANDLE terminationHandle)
     handleArray[0] = terminationHandle;
     handleArray[1] = modifiedListHead.newPagesEvent;
 
-    // zero pages until none left to zero
+    // write out modified pages to pagefile until modified page list empty
     while (TRUE) {
         BOOLEAN bres;
         bres = modifiedPageWriter();
@@ -657,7 +658,6 @@ testRoutine()
     PRINT_ALWAYS("[testRoutine]\n");
     
     /************** TESTING *****************/
-    PPTE currPTE = PTEarray;
     void* testVA = leafVABlock;
 
 
@@ -768,11 +768,13 @@ testRoutine()
     #ifdef TESTING_ZERO
     /************ for testing of zeropagethread **************/
 
-    HANDLE freePageTestHandle;
-    freePageTestHandle = CreateThread(NULL, 0, freePageTestThread, terminateZeroPageHandle, 0, NULL);
+    HANDLE freePageTestThreadHandles[NUM_ZERO_THREADS];
+    for (int i = 0; i < NUM_ZERO_THREADS; i++) {
+        freePageTestThreadHandles[i] = CreateThread(NULL, 0, freePageTestThread, terminateZeroPageHandle, 0, NULL);
 
-    if (freePageTestHandle == INVALID_HANDLE_VALUE) {
-        PRINT_ERROR("failed to create zeroPage handle\n");
+        if (freePageTestThreadHandles[i] == INVALID_HANDLE_VALUE) {
+            PRINT_ERROR("failed to create zeroPage handle\n");
+        }
     }
     #endif
 
@@ -835,12 +837,19 @@ testRoutine()
     WaitForMultipleObjects(NUM_ZERO_THREADS, zeroPageThreadHandles, TRUE, INFINITE);
 
     #ifdef TESTING_ZERO
-    WaitForSingleObject(freePageTestHandle, INFINITE);
+    WaitForMultipleObjects(NUM_ZERO_THREADS, freePageTestThreadHandles, TRUE, INFINITE);
+    
     #endif
 
     #endif
 
+    ULONG_PTR pageCount;
+    pageCount= 0;
+    for (int i = 0; i < ACTIVE; i++) {
 
+        pageCount += listHeads[i].count;
+    }
+    PRINT_ALWAYS("total page count %llu\n", pageCount);
 }
 
 
@@ -892,7 +901,7 @@ main(int argc, char** argv)
     BOOLEAN bResult;
 
     ULONG_PTR numPagesReturned = NUM_PAGES;
-    bResult = AllocateUserPhysicalPages(GetCurrentProcess(), &numPagesReturned, aPFNs);
+    bResult = (BOOLEAN) AllocateUserPhysicalPages(GetCurrentProcess(), &numPagesReturned, aPFNs);
     if (bResult != TRUE) {
         PRINT_ERROR("could not allocate pages successfully \n");
         exit(-1);
@@ -903,16 +912,16 @@ main(int argc, char** argv)
     }
 
     // create VAD
-    leafVABlock = initVABlock(numPagesReturned, PAGE_SIZE);     // will be the starting VA of the memory I've allocated
+    initVABlock(numPagesReturned, PAGE_SIZE);     // will be the starting VA of the memory I've allocated
 
     // create local PFN metadata array
-    PFNarray = initPFNarray(aPFNs, numPagesReturned, PAGE_SIZE);
+    initPFNarray(aPFNs, numPagesReturned);
 
     // create local PTE array to map VAs to pages
-    PTEarray = initPTEarray(numPagesReturned, PAGE_SIZE);
+    initPTEarray(numPagesReturned);
 
     // create PageFile section of memory
-    pageFileVABlock = initPageFile(PAGEFILE_SIZE);
+    initPageFile(PAGEFILE_SIZE);
 
     // call test routine
     testRoutine();

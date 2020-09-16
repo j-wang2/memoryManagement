@@ -11,6 +11,7 @@ SOURCES = $(CURRPROG).c enqueue-dequeue.c pageFault.c pageFile.c getPage.c PTEpe
 
 
 CFLAGS = /DEBUG:FULL /Zi
+WFLAGS = /W4 /wd4214 /wd4127
 CC = cl
 MAKE = make
 DEL = del /Q		## for windows makefile
@@ -20,9 +21,14 @@ DEL = del /Q		## for windows makefile
 # .PHONY: all clean
 
 all:
-	$(CC) $(CFLAGS) $(SOURCES)
-debug:
-	$(CC) $(CFLAGS) $(SOURCES)
+	$(CC) $(CFLAGS)  $(SOURCES)
+
+no-debug:
+	$(CC) $(SOURCES)
+
+warning:
+	$(CC) $(CFLAGS) $(WFLAGS) $(SOURCES)
+
 
 clean:
 	$(DEL) $(PROGS)

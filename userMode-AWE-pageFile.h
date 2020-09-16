@@ -85,6 +85,7 @@ typedef struct _PFNdata {
     ULONG64 statusBits: 5;
     ULONG64 pageFileOffset: PAGEFILE_BITS;
     ULONG64 PTEindex: PTE_INDEX_BITS;
+    ULONG64 writeInProgressBit: 1;
     ULONG64 refCount: 16;          
 } PFNdata, *PPFNdata;
 
@@ -241,20 +242,20 @@ getPrivilege ();
  *  - starting VA
  * 
  */
-PVOID
-initVABlock(int numPages, int pageSize);
+VOID
+initVABlock(ULONG_PTR numPages, ULONG_PTR pageSize);
 
 
-PPFNdata
-initPFNarray(PULONG_PTR aPFNs, int numPages, int pageSize);
+VOID
+initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages);
 
 
-PPTE
-initPTEarray(int numPages, int pageSize);
+VOID
+initPTEarray(ULONG_PTR numPages);
 
 
-PVOID
-initPageFile(int diskSize);
+VOID
+initPageFile(ULONG_PTR diskSize);
 
 
 BOOLEAN
