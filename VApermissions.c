@@ -83,93 +83,128 @@ BOOLEAN
 commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 {
 
-    // get the PTE from the VA
+    PPTE startPTE;
+    startPTE = getPTE(startVA);
+
+    // inclusive (use <= as condition)
+    PVOID endVA;
+    endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
+
+    PPTE endPTE;
+    endPTE = getPTE(endVA);
+    
     PPTE currPTE;
-    currPTE = getPTE(startVA);
 
-    // invalid VA (not in range)
-    if (currPTE == NULL) {
-        return FALSE;
+    for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
+
+        // invalid VA (not in range)
+        if (currPTE == NULL) {
+            PRINT_ERROR("[commitVA] Invalid PTE address - fatal error\n")
+            return FALSE;
+        }
+        
+        // make a shallow copy/"snapshot" of the PTE to edit and check
+        PTE tempPTE;
+        tempPTE = *currPTE;
+
+        // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
+        if (tempPTE.u1.hPTE.validBit == 1 || tempPTE.u1.tPTE.transitionBit == 1 || tempPTE.u1.pfPTE.permissions != NO_ACCESS) {
+            PRINT("[commitVA] PTE is already valid, transition, or demand zero\n");
+            // return FALSE;
+            continue;
+        }
+
+        if (totalCommittedPages < totalMemoryPageLimit) {
+
+            // commit with priviliges param (commits PTE)
+            tempPTE.u1.dzPTE.permissions = RWEpermissions;
+
+            tempPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
+            totalCommittedPages++;
+
+            PVOID currVA;
+            currVA = (PVOID) ( (ULONG_PTR) startVA + PAGE_SIZE* (currPTE - startPTE) );
+            PRINT("[commitVA] Committed PTE at VA %llx with permissions %d\n", (ULONG_PTR) currVA, RWEpermissions);
+
+        
+        } else {
+            // no remaining pages
+            PRINT_ERROR("[commitVA] no remaining pages - unable to commit PTE\n");
+            return FALSE;
+        }
+
+        * (volatile PTE *) currPTE = tempPTE;
+            
     }
-    
-    // make a shallow copy/"snapshot" of the PTE to edit and check
-    PTE tempPTE;
-    tempPTE = *currPTE;
-
-    // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
-    if (tempPTE.u1.hPTE.validBit == 1 || tempPTE.u1.tPTE.transitionBit == 1 || tempPTE.u1.pfPTE.permissions != NO_ACCESS) {
-        PRINT("PTE is already valid, transition, or demand zero\n");
-        return FALSE;
-    }
-
-    if (totalCommittedPages < totalMemoryPageLimit) {
-
-        // commit with priviliges param (commits PTE)
-        tempPTE.u1.dzPTE.permissions = RWEpermissions;
-
-        tempPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
-        totalCommittedPages++;
-        PRINT("Committed VA at %llu with permissions %d\n", (ULONG_PTR) startVA, RWEpermissions);
-    
-    } else {
-        // no remaining pages
-        PRINT_ERROR("no remaining pages\n");
-        return FALSE;
-    }
-
-    * (volatile PTE *) currPTE = tempPTE;
     return TRUE;
+
 }
 
 
-PTEpermissions
+BOOLEAN
 protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize) {
-        
-    // get the PTE from the VA
-    PPTE currPTE;
-    currPTE = getPTE(startVA);
 
-    // invalid VA (not in range)
-    if (currPTE == NULL) {
-        return NO_ACCESS;
-    }
+    PPTE startPTE;
+    startPTE = getPTE(startVA);
+
+    // inclusive (use <= as condition)
+    PVOID endVA;
+    endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
+
+    PPTE endPTE;
+    endPTE = getPTE(endVA);
     
-    // make a shallow copy/"snapshot" of the PTE to edit and check
-    PTE tempPTE;
-    tempPTE = *currPTE;
+    PPTE currPTE;
 
-    PTEpermissions oldPermissions;
+    for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
-    // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
-    if (tempPTE.u1.hPTE.validBit == 1) {
-
-        oldPermissions = getPTEpermissions(tempPTE);
-        transferPTEpermissions(&tempPTE, newRWEpermissions);
-
-    }
-    else if ( tempPTE.u1.tPTE.transitionBit == 1 ) {
-
-        oldPermissions = tempPTE.u1.tPTE.permissions;
-        tempPTE.u1.tPTE.permissions = newRWEpermissions;
-
-    }
-    else if ( tempPTE.u1.pfPTE.permissions != NO_ACCESS) {      // handles both pfPTE and dzPTE formats (since are identical in format)
+        // invalid VA (not in range)
+        if (currPTE == NULL) {
+            PRINT_ERROR("[protectVA] Invalid PTE address - fatal error\n")
+            return FALSE;
+        }
         
-        oldPermissions = tempPTE.u1.pfPTE.permissions;
-        tempPTE.u1.pfPTE.permissions = newRWEpermissions;
+        // make a shallow copy/"snapshot" of the PTE to edit and check
+        PTE tempPTE;
+        tempPTE = *currPTE;
 
+        PTEpermissions oldPermissions;
+
+        if (tempPTE.u1.hPTE.validBit == 1) {
+
+            oldPermissions = getPTEpermissions(tempPTE);
+            transferPTEpermissions(&tempPTE, newRWEpermissions);
+
+        }
+        else if ( tempPTE.u1.tPTE.transitionBit == 1 ) {
+
+            oldPermissions = tempPTE.u1.tPTE.permissions;
+            tempPTE.u1.tPTE.permissions = newRWEpermissions;
+
+        }
+        else if ( tempPTE.u1.pfPTE.permissions != NO_ACCESS) {      // handles both pfPTE and dzPTE formats (since are identical in format)
+            
+            oldPermissions = tempPTE.u1.pfPTE.permissions;
+            tempPTE.u1.pfPTE.permissions = newRWEpermissions;
+
+        }
+        else {
+
+            PRINT("PTE is not already valid, transition, or demand zero\n");
+            continue;
+
+        }
+
+
+        PVOID currVA;
+        currVA = (PVOID) ( (ULONG_PTR) startVA + PAGE_SIZE* (currPTE - startPTE) );
+        PRINT("[protectVA] Updated permissions for PTE at VA %llx with permissions %d\n", (ULONG_PTR) currVA, newRWEpermissions);
+
+        * (volatile PTE *) currPTE = tempPTE;
+                
     }
-    else {
 
-        PRINT("PTE is not already valid, transition, or demand zero\n");
-        return NO_ACCESS;
-
-    }
-
-    PRINT("[protectVA] updated VA permissions\n");
-
-    * (volatile PTE *) currPTE = tempPTE;
-    return oldPermissions;
+    return TRUE;
 
 }
 

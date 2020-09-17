@@ -22,7 +22,7 @@ setPFBitIndex()
                 currFrame = pageFileBitArray[i];
 
                 // set the bit
-                currFrame |= (1 << j);
+                currFrame |= ((ULONG_PTR)1 << j);
 
                 // set the frame in the bitarray to the edited frame
                 pageFileBitArray[i] = currFrame;

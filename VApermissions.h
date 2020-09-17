@@ -57,11 +57,11 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize);
  * protectVA: function to update permissions for a PTE associated with a VA
  *  - updates to permissions passed in parameter newRWEpermissions
  * 
- * Returns PTEpermissions
- *  - previous PTE permissions on success
- *  - NO_ACCESS on failure
+ * Returns BOOLEAN
+ *  - TRUE on success
+ *  - FALSE on failure
  */
-PTEpermissions
+BOOLEAN
 protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize);
 
 

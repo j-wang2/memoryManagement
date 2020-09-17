@@ -101,6 +101,13 @@ typedef struct _VANode {
     PVOID VA;
 } VANode, *PVANode;
 
+// typedef struct _VADNode {
+//     LIST_ENTRY links;
+//     PVOID startVA;
+//     PVOID endVA;
+//     PTEpermissions permissions;
+//     ULONG64 commitBit: 1;
+// } VADNode, *PVADNode;
 
 /*********** ENUM definitions ************/
 typedef enum {          // DO NOT EDIT ORDER without checking enqueue/dequeue

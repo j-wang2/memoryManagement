@@ -40,6 +40,8 @@ listData listHeads[ACTIVE];         // intialization of listHeads array
 
 listData zeroVAListHead;            // list of zeroVAs used for zeroing PFNs (via AWE mapping)
 
+listData VADListHead;               // list of VADs
+
 BOOLEAN debugMode;
 
 #define TESTING_ZERO
@@ -473,7 +475,6 @@ freePageTestThread(HANDLE terminationHandle)
 }
 
 
-
 BOOLEAN
 modifiedPageWriter()
 {
@@ -647,8 +648,19 @@ initZeroVAList(ULONG_PTR numVAs)
         // enqueue node to list
         enqueueVA(&zeroVAListHead, currNode);
     }
-
     
+}
+
+VOID
+initVADList()
+{
+    InitializeCriticalSection(&(VADListHead.lock));
+
+    initLinkHead(&(VADListHead.head));
+
+    VADListHead.count = 0;
+
+    // do i need to do an event here?
 }
 
 
@@ -674,8 +686,8 @@ testRoutine()
 
         faultStatus testStatus;
 
-        commitVA(testVA, READ_ONLY, 1);    // commits with READ_ONLY permissions
-        protectVA(testVA, READ_WRITE, 1);   // converts to read write
+        commitVA(testVA, READ_ONLY, PAGE_SIZE*3);    // commits with READ_ONLY permissions
+        protectVA(testVA, READ_WRITE, PAGE_SIZE *3);   // converts to read write
 
         // commitVA(testVA, READ_WRITE, 1);    // commits with read/write permissions (VirtualProtect does not allow execute permissions)
         testStatus = writeVA(testVA, testVA);
