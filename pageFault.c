@@ -47,6 +47,8 @@ PRINT("PFN is already valid\n");
 faultStatus
 transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 {
+
+
     PRINT(" - trans page fault\n");
 
     // declare pageNum (PFN) ULONG
@@ -55,6 +57,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     PTE newPTE;
     newPTE.u1.ulongPTE = 0;
 
+
     // check permissions
     PTEpermissions transRWEpermissions = snapPTE.u1.tPTE.permissions;
     if (!checkPTEpermissions(transRWEpermissions, RWEpermissions)) {
@@ -62,19 +65,20 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         PRINT_ERROR("Invalid permissions\n");
         return ACCESS_VIOLATION;
 
-    } 
+    }
 
+    // get page number with transition PTE
     pageNum = snapPTE.u1.tPTE.PFN;
 
     PPFNdata transitionPFN;
     transitionPFN = PFNarray + pageNum;
 
-    // if attempting to write, set dirty bit & clear PF location if it exists (TODO multithreading)
+
+    // if attempting to write, set dirty bit & clear PF location if it exists
     if (permissionMasks[RWEpermissions] & writeMask) { 
 
         // set PTE to dirty
         newPTE.u1.hPTE.dirtyBit = 1;
-
 
         // TODO - do not clear if Write in progress bit set
         // free PF location
@@ -95,12 +99,19 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         
     }
 
+
     // copy permissions from transition PTE into our soon-to-be-active PTE
     transferPTEpermissions(&newPTE, transRWEpermissions);
 
-    // TODO  - do not dequeue if WIP
-    // dequeue from either standby or modified list
-    dequeueSpecificPage(transitionPFN);
+
+    // only dequeue if write in progress bit is zero
+    if (transitionPFN->writeInProgressBit == 0) {
+
+        // dequeue from either standby or modified list
+        dequeueSpecificPage(transitionPFN);
+
+    }
+
 
     // & set status to active
     transitionPFN->statusBits = ACTIVE;
@@ -142,7 +153,7 @@ faultStatus
 pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 {
 
-PRINT(" - pf page fault\n");
+    PRINT(" - pf page fault\n");
 
     // declare pageNum (PFN) ULONG
     ULONG_PTR pageNum;
@@ -165,7 +176,7 @@ PRINT(" - pf page fault\n");
     PPFNdata freedPFN;
     freedPFN = getPage();
     if (freedPFN == NULL) {
-        PRINT_ERROR("failed to successfully dequeue PFN from freed list\n");
+        PRINT_ERROR("[pageFilePageFault] failed to successfully acquire PFN in getPage\n");
         return NO_FREE_PAGES;
     }
 
@@ -275,7 +286,7 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     freedPFN = getPage();
 
     if (freedPFN == NULL) {
-        PRINT_ERROR("failed to successfully dequeue PFN from freed list\n");
+        PRINT_ERROR("[dzPageFault] failed to successfully acquire PFN in getPage\n");
         return NO_FREE_PAGES;
     }
 
@@ -323,26 +334,6 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
 }
 
-
-// PVADNode
-// getVAD(void* virtualAddress)
-// {
-//     PVADNode currVAD;
-
-//     for (currVAD = VADList.links.Flink; currVAD != &VADList; currVad = currVAD->links.Flink){
-//     // while (currVAD->links.Flink != &currVAD) {
-
-//         // if in a VAD
-//         if (currVAD->startVA <= virtualAddress && virtualAddress <= currVAD->endVA) {
-
-//             return currVAD;
-            
-//         }
-
-//     }
-//     PRINT_ERROR(" not in VAD\n");
-//     return NULL;
-// }
 
 
 // faultStatus

@@ -211,94 +211,119 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
 
 BOOLEAN
 decommitVA (PVOID startVA, ULONG_PTR commitSize) {
+
+
+    PPTE startPTE;
+    startPTE = getPTE(startVA);
+
+    // inclusive (use <= as condition)
+    PVOID endVA;
+    endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
+
+    PPTE endPTE;
+    endPTE = getPTE(endVA);
+    
     PPTE currPTE;
-    currPTE = getPTE(startVA);
 
-    if (currPTE == NULL) {
-        return FALSE;
-    }
+    // temp fix - TODO. Limits to a single decommit at a given time.
+    endPTE = startPTE;
 
-    // make a shallow copy/"snapshot" of the PTE to edit and check
-    PTE tempPTE;
-    tempPTE = *currPTE;
+    for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
-    // check if PTE is already zeroed
-    if (tempPTE.u1.ulongPTE == 0) {
-        PRINT_ERROR("VA is already decommitted\n");
-        return FALSE;
-    }
-
-    // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
-
-    else if (tempPTE.u1.hPTE.validBit == 1) {                       // valid/hardware format
-
-        // get PFN
-        PPFNdata currPFN;
-        currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
-
-        // unmap VA from page
-        MapUserPhysicalPages(startVA, 1, NULL);
-
-        // if the PFN contents is also stored in pageFile
-        if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
-            clearPFBitIndex(currPFN->pageFileOffset);
+        if (currPTE == NULL) {
+            PRINT_ERROR("[decommitVA] Invalid PTE address - fatal error\n")
+            return FALSE;
         }
 
-        // enqueue Page to free list
-        enqueuePage(&freeListHead, currPFN);
+        // make a shallow copy/"snapshot" of the PTE to edit and check
+        PTE tempPTE;
+        tempPTE = *currPTE;
 
-    } 
-    else if (tempPTE.u1.tPTE.transitionBit == 1) {                  // transition format
-
-        // get PFN
-        PPFNdata currPFN;
-        currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
-
-
-        // dequeue from standby/modified list
-        dequeueSpecificPage(currPFN);
-        
-        // if the PFN contents is also stored in pageFile
-        if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
-            clearPFBitIndex(currPFN->pageFileOffset);
+        // check if PTE is already zeroed
+        if (tempPTE.u1.ulongPTE == 0) {
+            PRINT("VA is already decommitted\n");
+            continue;
         }
 
-        // enqueue Page to free list
-        enqueuePage(&freeListHead, currPFN);
+        // PVOID currVA;
+        // currVA = (PVOID) ( (ULONG_PTR) startVA + PAGE_SIZE* (currPTE - startPTE) );
+        // PRINT("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+        // PRINT("decommiting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) currVA, * (PCHAR *) currVA);
 
-    }  
-    else if (tempPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {     // pagefile format
 
-        clearPFBitIndex(tempPTE.u1.pfPTE.pageFileIndex);
-        tempPTE.u1.ulongPTE = 0;
+        // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
 
+        else if (tempPTE.u1.hPTE.validBit == 1) {                       // valid/hardware format
+
+            // get PFN
+            PPFNdata currPFN;
+            currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
+
+            // unmap VA from page
+            MapUserPhysicalPages(startVA, 1, NULL);
+
+            // if the PFN contents is also stored in pageFile
+            if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
+                clearPFBitIndex(currPFN->pageFileOffset);
+            }
+
+            // enqueue Page to free list
+            enqueuePage(&freeListHead, currPFN);
+
+        } 
+        else if (tempPTE.u1.tPTE.transitionBit == 1) {                  // transition format
+
+            // get PFN
+            PPFNdata currPFN;
+            currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
+
+
+            // dequeue from standby/modified list
+            dequeueSpecificPage(currPFN);
+            
+            // if the PFN contents is also stored in pageFile
+            if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
+                clearPFBitIndex(currPFN->pageFileOffset);
+            }
+
+            // enqueue Page to free list
+            enqueuePage(&freeListHead, currPFN);
+
+        }  
+        else if (tempPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {     // pagefile format
+
+            clearPFBitIndex(tempPTE.u1.pfPTE.pageFileIndex);
+            tempPTE.u1.ulongPTE = 0;
+
+        }
+        else if (tempPTE.u1.pfPTE.permissions != NO_ACCESS) {                   // demand zero format
+
+            tempPTE.u1.ulongPTE = 0;
+
+        }
+
+        else if (tempPTE.u1.ulongPTE == 0) {                            // zero PTE
+            PRINT_ERROR("[decommitVA] already decommitted\n");
+            return TRUE;
+        }
+
+        // decrement count of committed pages
+        if (totalCommittedPages > 0)  {
+
+            totalCommittedPages--;
+
+        } else {
+
+            PRINT_ERROR("[decommitVA] bookkeeping error - no committed pages\n");
+            return FALSE;
+
+        }
+
+        memset(&tempPTE, 0, sizeof(PTE));
+
+        * (volatile PTE *) currPTE = tempPTE;
     }
-    else if (tempPTE.u1.pfPTE.permissions != NO_ACCESS) {                   // demand zero format
-
-        tempPTE.u1.ulongPTE = 0;
-
-    }
-
-    else if (tempPTE.u1.ulongPTE == 0) {                            // zero PTE
-        PRINT_ERROR("[decommitVA] already decommitted\n");
-        return TRUE;
-    }
-
-    // decrement count of committed pages
-    if (totalCommittedPages > 0)  {
-
-        totalCommittedPages--;
-
-    } else {
-
-        PRINT_ERROR("[decommitVA] bookkeeping error - no committed pages\n");
-        return FALSE;
-
-    }
-
-    memset(&tempPTE, 0, sizeof(PTE));
-
-    * (volatile PTE *) currPTE = tempPTE;
     return TRUE;
+
 }
 

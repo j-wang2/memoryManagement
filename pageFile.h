@@ -26,7 +26,7 @@ clearPFBitIndex(ULONG_PTR pfVA);
 
 
 /*
- * writePage: function to write out a given page (associated w PFN metadata) to pagefile
+ * writePageToFileSystem: function to write out a given page (associated w PFN metadata) to pagefile
  *  - calls setPFBitIndex to find and set free block in pageFile
  *  - if found
  *    - copy contents of given page to pagefile location
@@ -36,6 +36,6 @@ clearPFBitIndex(ULONG_PTR pfVA);
  *  - FALSE on failure
  */
 BOOLEAN
-writePage(PPFNdata PFNtoWrite);
+writePageToFileSystem(PPFNdata PFNtoWrite);
 
 #endif

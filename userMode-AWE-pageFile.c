@@ -45,6 +45,7 @@ listData VADListHead;               // list of VADs
 BOOLEAN debugMode;
 
 #define TESTING_ZERO
+#define TESTING_MODIFIED
 
 
 PPTE
@@ -236,6 +237,7 @@ initVABlock(ULONG_PTR numPages, ULONG_PTR pageSize)
         exit(-1);
     }
 
+    // TODO - do i need to avoid overflow?
     leafVABlockEnd = (PVOID) ( (ULONG_PTR)leafVABlock + NUM_PAGES*PAGE_SIZE );
 
 }
@@ -311,6 +313,9 @@ initPageFile(ULONG_PTR diskSize)
         PRINT_ERROR("Could not allocate for pageFile\n");
         exit(-1);
     }
+
+    //TODO - reserves extra spot
+    totalCommittedPages++;
 
 }
 
@@ -483,7 +488,7 @@ modifiedPageWriter()
     PRINT("[modifiedPageWriter] modifiedListCount == %llu\n", modifiedListHead.count);
     PPFNdata PFNtoWrite;
 
-    // PFNtoWrite->writeInProgressBit = 1;     // TODO - needs to be changed
+
     PFNtoWrite = dequeuePage(&modifiedListHead);
 
 
@@ -492,9 +497,15 @@ modifiedPageWriter()
         return FALSE;
     }
 
-                ///  TODO may need to improve backtracking
+
+    // set write in progress bit to 1
+    PFNtoWrite->writeInProgressBit = 1;
+
+
+    // write page out
     BOOLEAN bResult;
-    bResult = writePage(PFNtoWrite);
+    bResult = writePageToFileSystem(PFNtoWrite);
+
 
     if (bResult != TRUE) {
         PRINT_ERROR("[modifiedPageWriter] error writing out page\n");
@@ -502,13 +513,39 @@ modifiedPageWriter()
         return FALSE;
     }
 
+
     // PFN status to standby (from modified)
     PFNtoWrite->statusBits = STANDBY;
+
 
     // enqueue page to standby
     enqueuePage(&standbyListHead, PFNtoWrite);
 
+
+    // clear write in progress bit (since page has both been written and re-enqueued)
+    PFNtoWrite->writeInProgressBit = 0;
+
     PRINT(" - Moved page from modified -> standby (wrote out to PageFile successfully)\n");
+
+
+    // check PTE dirty bit - if it has been set again, it is now dirty and we can clear the PF index
+    // also need to clear if it has been faulted in, and trimmed again back to modified
+    PPTE currPTE;
+    currPTE = PTEarray + PFNtoWrite->PTEindex;
+
+    // clear pf index out of PFN and control array
+    if ( ( currPTE->u1.hPTE.validBit == 1 && currPTE->u1.hPTE.dirtyBit == 1) || PFNtoWrite->statusBits == MODIFIED) {
+
+        // free PF location from PFN
+        clearPFBitIndex(PFNtoWrite->pageFileOffset);
+
+        // clear pagefile pointer out of PFN
+        PFNtoWrite->pageFileOffset = INVALID_PAGEFILE_INDEX;
+        
+        PRINT(" - Page has since been write faulted (discarding PF space)\n");
+
+    }
+
 
     return TRUE;   
 
@@ -678,7 +715,7 @@ testRoutine()
 
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
-    ULONG_PTR testNum = 10;
+    ULONG_PTR testNum = 400;
     PRINT_ALWAYS("Committing and then faulting in %llu pages\n", testNum);
 
 
@@ -705,8 +742,11 @@ testRoutine()
 
         /************ TRADING pages ***********/
 
+        #ifdef TRADE_PAGES
         PRINT("Attempting to trade VA\n");
         tradeVA(testVA);
+
+        #endif
 
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
@@ -731,13 +771,20 @@ testRoutine()
         trimPage(testVA);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
 
+
+        // #ifndef MULTITHREADING                      // TODO: move when we have modifiedpagewriter thread
+
+        #ifndef TESTING_MODIFIED
         // alternate calling modifiedPageWriter and zeroPageWriter
         if (i % 2 == 0) {
 
             modifiedPageWriter();
 
         } 
+        #endif
+
         #ifndef MULTITHREADING                      // TODO: move when we have modifiedpagewriter thread
+
         else {
             
             zeroPageWriter();
@@ -785,8 +832,21 @@ testRoutine()
         freePageTestThreadHandles[i] = CreateThread(NULL, 0, freePageTestThread, terminateZeroPageHandle, 0, NULL);
 
         if (freePageTestThreadHandles[i] == INVALID_HANDLE_VALUE) {
-            PRINT_ERROR("failed to create zeroPage handle\n");
+            PRINT_ERROR("failed to create freePage handle\n");
         }
+    }
+    #endif
+
+    #ifdef TESTING_MODIFIED
+    HANDLE modifiedPageWriterThreadHandles[NUM_ZERO_THREADS];
+    for (int i = 0; i < NUM_ZERO_THREADS; i++) {
+
+        modifiedPageWriterThreadHandles[i] = CreateThread(NULL, 0, modifiedPageThread, terminateZeroPageHandle, 0, NULL);
+            
+        if (modifiedPageWriterThreadHandles[i] == INVALID_HANDLE_VALUE) {
+            PRINT_ERROR("failed to create modifiedPageWriting handle\n");
+        }
+  
     }
     #endif
 
@@ -794,17 +854,6 @@ testRoutine()
     #endif
 
     PRINT_ALWAYS("--------------------------------\n");
-
-    // testVA = leafVABlock;
-
-    // // toggle - can either FAULT or TEST VAs 
-    // for (int i = 0; i < testNum; i++) {
-    //     faultStatus testStatus = accessVA(testVA, READ_WRITE);  // to TEST VAs
-    //     // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
-    
-    //     PRINT("tested (VA = %d), return status = %u\n", (ULONG) testVA, testStatus);
-    //     testVA = (void*) ( (ULONG) testVA + PAGE_SIZE);
-    // }
 
 
     /****************** FAULTING back in trimmed pages ******************/
@@ -834,10 +883,7 @@ testRoutine()
 
     for (int i = 0; i < testNum; i++) {
 
-        PRINT("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) testVA, * (ULONG_PTR*) testVA);
-        PRINT("decommiting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) testVA, * (PCHAR *) testVA);
-
-        decommitVA(testVA, 1);
+        decommitVA(testVA, PAGE_SIZE*3);
 
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
     }
@@ -851,6 +897,10 @@ testRoutine()
     #ifdef TESTING_ZERO
     WaitForMultipleObjects(NUM_ZERO_THREADS, freePageTestThreadHandles, TRUE, INFINITE);
     
+    #endif
+
+    #ifdef TESTING_MODIFIED
+    WaitForMultipleObjects(NUM_ZERO_THREADS, modifiedPageWriterThreadHandles, TRUE, INFINITE);
     #endif
 
     #endif

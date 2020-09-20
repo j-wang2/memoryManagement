@@ -18,6 +18,7 @@
 
 // #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
 
+#define PERMISSIONS_BITS 3
 
 #define PTE_INDEX_BITS 9                            // log2(NUM_PAGES)
 #define PAGE_SIZE 4096                              // page size
@@ -49,7 +50,7 @@ typedef struct _hardwarePTE{
 typedef struct _transitionPTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for tPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 1 for dzPTE
-    ULONG64 permissions: 3;                    // read if 0, write if 1
+    ULONG64 permissions: PERMISSIONS_BITS;                    // read if 0, write if 1
     ULONG64 readInProgressBit: 1;
     ULONG64 PFN: PFN_BITS;
 } transitionPTE, *PtransitionPTE;
@@ -57,14 +58,14 @@ typedef struct _transitionPTE{
 typedef struct _pageFilePTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
-    ULONG64 permissions: 3;
+    ULONG64 permissions: PERMISSIONS_BITS;
     ULONG64 pageFileIndex: PAGEFILE_BITS;
 } pageFilePTE, *PpageFilePTE;
 
 typedef struct _demandZeroPTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
-    ULONG64 permissions: 3;
+    ULONG64 permissions: PERMISSIONS_BITS;
     ULONG64 pageFileIndex: PAGEFILE_BITS;   // PF index MUST be INVALID_PAGEFILE_INDEX( MAXULONG_PTR) for dzPTE
 } demandZeroPTE, *PdemandZeroPTE;
 
@@ -101,13 +102,7 @@ typedef struct _VANode {
     PVOID VA;
 } VANode, *PVANode;
 
-// typedef struct _VADNode {
-//     LIST_ENTRY links;
-//     PVOID startVA;
-//     PVOID endVA;
-//     PTEpermissions permissions;
-//     ULONG64 commitBit: 1;
-// } VADNode, *PVADNode;
+
 
 /*********** ENUM definitions ************/
 typedef enum {          // DO NOT EDIT ORDER without checking enqueue/dequeue
@@ -179,6 +174,9 @@ extern listData listHeads[ACTIVE];
 #define quarantineListHead listHeads[QUARANTINE]
 
 extern listData zeroVAListHead;             // list of zeroVAs used for zeroing PFNs (via AWE mapping)
+
+extern listData VADListHead;               // list of VADs
+
 
 // toggle multithreading on and off
 #define MULTITHREADING
@@ -285,7 +283,7 @@ zeroPageThread();
  * 
  * modifiedPageWriter: function to pull a page off modified list and write to pagefile
  * - checks if rhere are any pages on modified list
- * - if there are, call writePage, update status bits and enqueue PFN to standby list
+ * - if there are, call writePageToFileSystem, update status bits and enqueue PFN to standby list
  * 
  * returns BOOLEAN:
  *  - TRUE on success

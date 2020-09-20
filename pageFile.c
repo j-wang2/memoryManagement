@@ -52,7 +52,7 @@ clearPFBitIndex(ULONG_PTR pfVA)
     j = pfVA % (sizeof(ULONG_PTR) * 8);
 
     currFrame = pageFileBitArray[i];
-    currFrame &= ~(1 << j);
+    currFrame &= ~((ULONG_PTR)1 << j);
 
     pageFileBitArray[i] = currFrame;
 
@@ -60,7 +60,7 @@ clearPFBitIndex(ULONG_PTR pfVA)
 
 
 BOOLEAN
-writePage(PPFNdata PFNtoWrite)
+writePageToFileSystem(PPFNdata PFNtoWrite)
 {
 
     ULONG_PTR PFN;
