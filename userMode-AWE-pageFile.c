@@ -29,7 +29,6 @@ ULONG_PTR totalCommittedPages;      // count of committed pages (initialized to 
 ULONG_PTR totalMemoryPageLimit = NUM_PAGES + PAGEFILE_SIZE / PAGE_SIZE;    // limit of committed pages (memory block + pagefile space)
 
 void* pageFileVABlock;              // starting address of pagefile "disk" (memory)
-void* modifiedWriteVA;              // specific VA used for writing out page contents to pagefile
 void* pageFileFormatVA;             // specific VA used for copying in page contents from pagefile
 ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 
@@ -39,6 +38,7 @@ ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask |
 listData listHeads[ACTIVE];         // intialization of listHeads array
 
 listData zeroVAListHead;            // list of zeroVAs used for zeroing PFNs (via AWE mapping)
+listData writeVAListHead;           // list of writeVAs used for writing to page file
 
 listData VADListHead;               // list of VADs
 
@@ -328,7 +328,7 @@ zeroPage(ULONG_PTR PFN)
     zeroVANode = dequeueVA(&zeroVAListHead);
 
     if (zeroVANode == NULL) {
-        PRINT("TODO: waiting for release\n");
+        PRINT("[zeroPage] TODO: waiting for release\n");
     }
 
     PVOID zeroVA;
@@ -337,6 +337,7 @@ zeroPage(ULONG_PTR PFN)
     // map given page to the "zero" VA
     if (!MapUserPhysicalPages(zeroVA, 1, &PFN)) {
         PRINT_ERROR("error remapping zeroVA\n");
+        enqueueVA(&zeroVAListHead, zeroVANode);
         return FALSE;
     }
 
@@ -345,6 +346,7 @@ zeroPage(ULONG_PTR PFN)
     // unmap zeroVA from page - PFN is now ready to be alloc'd
     if (!MapUserPhysicalPages(zeroVA, 1, NULL)) {
         PRINT_ERROR("error zeroing page\n");
+        enqueueVA(&zeroVAListHead, zeroVANode);
         return FALSE;
     }
 
@@ -483,7 +485,6 @@ freePageTestThread(HANDLE terminationHandle)
 BOOLEAN
 modifiedPageWriter()
 {
-
 
     PRINT("[modifiedPageWriter] modifiedListCount == %llu\n", modifiedListHead.count);
     PPFNdata PFNtoWrite;
@@ -633,35 +634,35 @@ initListHeads(PlistData listHeadArray)
  
 
 VOID
-initZeroVAList(ULONG_PTR numVAs)
+initVAList(PlistData VAListHead, ULONG_PTR numVAs)
 {
     if (numVAs < 1) {
-        PRINT_ERROR("[initZeroVAList] Cannot initialize list of zeroVAs with length 0\n");
+        PRINT_ERROR("[initVAList] Cannot initialize list of VAs with length 0\n");
         exit (-1);
     }
 
     // initialize lock field
-    InitializeCriticalSection(&(zeroVAListHead.lock));
+    InitializeCriticalSection(&(VAListHead->lock));
 
     // initialize head
-    initLinkHead(&(zeroVAListHead.head));
+    initLinkHead(&(VAListHead->head));
 
-    zeroVAListHead.count = 0;
+    VAListHead->count = 0;
 
     HANDLE newVAsHandle;
     newVAsHandle =  CreateEvent(NULL, FALSE, FALSE, NULL);
 
     if (newVAsHandle == INVALID_HANDLE_VALUE) {
-        PRINT_ERROR("[initZeroVAList] failed to create event handle\n");
+        PRINT_ERROR("[initVAList] failed to create event handle\n");
         exit(-1);
     }
 
-    zeroVAListHead.newPagesEvent = newVAsHandle;
+    VAListHead->newPagesEvent = newVAsHandle;
 
 
     // alloc for VAs
-    void* baseZeroVA;
-    baseZeroVA = VirtualAlloc(NULL, numVAs * PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+    void* baseVA;
+    baseVA = VirtualAlloc(NULL, numVAs * PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
 
     // alloc for nodes
     PVANode baseNode;
@@ -678,12 +679,12 @@ initZeroVAList(ULONG_PTR numVAs)
         currNode = baseNode + i;
 
         // get address of current address
-        currVA = (void*) ( (ULONG_PTR)baseZeroVA + i*PAGE_SIZE );
+        currVA = (void*) ( (ULONG_PTR)baseVA + i*PAGE_SIZE );
 
         currNode->VA = currVA;
 
         // enqueue node to list
-        enqueueVA(&zeroVAListHead, currNode);
+        enqueueVA(VAListHead, currNode);
     }
     
 }
@@ -715,7 +716,7 @@ testRoutine()
 
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
-    ULONG_PTR testNum = 400;
+    ULONG_PTR testNum = 100;
     PRINT_ALWAYS("Committing and then faulting in %llu pages\n", testNum);
 
 
@@ -928,15 +929,14 @@ main(int argc, char** argv)
     initListHeads(listHeads);
 
     // initialize zeroVAList, consisting of AWE addresses for zeroing pages
-    initZeroVAList(NUM_ZERO_THREADS + 3);
+    initVAList(&zeroVAListHead, NUM_ZERO_THREADS + 3);
+
+    initVAList(&writeVAListHead, NUM_ZERO_THREADS + 3);
 
 
     // reserve AWE addresses for page trading
     pageTradeDestVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
     pageTradeSourceVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
-
-    // reserve AWE address for modifiedWriteVA 
-    modifiedWriteVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
 
     // reserve AWE address for pageFileFormatVA
     pageFileFormatVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);

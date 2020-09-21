@@ -25,13 +25,13 @@ tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)
 BOOLEAN
 copyPage(ULONG_PTR dest, ULONG_PTR src)
 {
-    // map given page to the "zero" VA
+    // map given page to the pageTradeSoureVA
     if (!MapUserPhysicalPages(pageTradeSourceVA, 1, &src)) {
         PRINT_ERROR("error remapping srcVA\n");
         return FALSE;
     }
 
-    // map given page to the "zero" VA
+    // map given page to the pageTradeDestVA VA
     if (!MapUserPhysicalPages(pageTradeDestVA, 1, &dest)) {
         PRINT_ERROR("error remapping destVA\n");
         return FALSE;
@@ -39,13 +39,13 @@ copyPage(ULONG_PTR dest, ULONG_PTR src)
 
     memcpy(pageTradeDestVA, pageTradeSourceVA, PAGE_SIZE);
 
-    // unmap zeroVA from page - PFN is now ready to be alloc'd
+    // unmap pageTradeDestVA from page - PFN is now ready to be alloc'd
     if (!MapUserPhysicalPages(pageTradeDestVA, 1, NULL)) {
         PRINT_ERROR("error copying page\n");
         return FALSE;
     }
 
-        // unmap zeroVA from page - PFN is now ready to be alloc'd
+        // unmap pageTradeSoureVA from page - PFN is now ready to be alloc'd
     if (!MapUserPhysicalPages(pageTradeSourceVA, 1, NULL)) {
         PRINT_ERROR("error copying page\n");
         return FALSE;

@@ -1,4 +1,5 @@
 #include "userMode-AWE-pageFile.h"
+#include "enqueue-dequeue.h"
 // #include "pagefile.h"
 
 
@@ -63,6 +64,16 @@ BOOLEAN
 writePageToFileSystem(PPFNdata PFNtoWrite)
 {
 
+    PVANode writeVANode;
+    writeVANode = dequeueVA(&writeVAListHead);
+
+    if (writeVANode == NULL) {
+        PRINT("[modifiedPageWriter] TODO: waiting for release\n");
+    }
+
+    PVOID modifiedWriteVA;
+    modifiedWriteVA = writeVANode->VA;
+
     ULONG_PTR PFN;
     PFN = PFNtoWrite - PFNarray;
 
@@ -77,6 +88,7 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
     if (!MapUserPhysicalPages(modifiedWriteVA, 1, &PFN)) {
         PRINT_ERROR("error mapping modifiedWriteVA\n");
         clearPFBitIndex(bitIndex);
+        enqueueVA(&writeVAListHead, writeVANode);
         return FALSE;
     }
 
@@ -91,8 +103,12 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
     if (!MapUserPhysicalPages(modifiedWriteVA, 1, NULL)) {
         PRINT_ERROR("error unmapping modifiedWriteVA\n");
         clearPFBitIndex(bitIndex);                      // TODO - does order matter here?
+        enqueueVA(&writeVAListHead, writeVANode);
         return FALSE;
     }
+
+    enqueueVA(&writeVAListHead, writeVANode);
+
 
     // add/update pageFileOffset field of PFN
     // ONLY updates if the mapuserphysical pages calls are also successful

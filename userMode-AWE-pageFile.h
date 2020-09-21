@@ -104,6 +104,7 @@ typedef struct _VANode {
 
 
 
+
 /*********** ENUM definitions ************/
 typedef enum {          // DO NOT EDIT ORDER without checking enqueue/dequeue
     ZERO,               // 0
@@ -144,8 +145,6 @@ extern void* leafVABlockEnd;               // ending address of memory block
 extern PPFNdata PFNarray;                  // starting address of PFN array
 extern PPTE PTEarray;                      // starting address of page table
 
-// extern void* zeroVA;                       // specific VA used for zeroing PFNs (via AWE mapping)
-
 extern void* pageTradeDestVA;              // specific VA used for page trading destination
 extern void* pageTradeSourceVA;            // specific VA used for page trading source
 
@@ -154,7 +153,6 @@ extern ULONG_PTR totalMemoryPageLimit;     // limit of committed pages (memory b
 
 
 extern void* pageFileVABlock;              // starting address of pagefile "disk" (memory)
-extern void* modifiedWriteVA;              // specific VA used for writing out page contents to pagefile
 extern void* pageFileFormatVA;             // specific VA used for copying in page contents from pagefile
 extern ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 
@@ -174,6 +172,8 @@ extern listData listHeads[ACTIVE];
 #define quarantineListHead listHeads[QUARANTINE]
 
 extern listData zeroVAListHead;             // list of zeroVAs used for zeroing PFNs (via AWE mapping)
+extern listData writeVAListHead;            // list of writeVAs used for writing to page file
+
 
 extern listData VADListHead;               // list of VADs
 

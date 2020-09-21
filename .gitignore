@@ -6,3 +6,4 @@
 *.pdb
 legacy-programs/
 todo.txt
+vadNodes.c

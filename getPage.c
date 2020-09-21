@@ -127,7 +127,6 @@ getPage()
         ULONG_PTR PFN;
         PFN = returnPFN - PFNarray;
 
-        // TODO - fix zeroVA multithreading
         // zeroPage (does not update status bits in PFN metadata)
         zeroPage(PFN);
 
