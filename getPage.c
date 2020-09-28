@@ -8,7 +8,8 @@ getZeroPage()
     PPFNdata returnPFN;
     if (zeroListHead.count != 0) {
 
-        returnPFN = dequeuePage(&zeroListHead);
+        // get a locked page from the zero list head
+        returnPFN = dequeueLockedPage(&zeroListHead, FALSE);
 
         if (returnPFN == NULL) {
             PRINT("[getPage] zero list empty\n");
@@ -30,7 +31,7 @@ getFreePage()
 {
     PPFNdata returnPFN;
     if (freeListHead.count != 0) {
-        returnPFN = dequeuePage(&freeListHead);
+        returnPFN = dequeueLockedPage(&freeListHead, FALSE);
 
         if (returnPFN == NULL) {
             PRINT("[getPage] free list empty\n");

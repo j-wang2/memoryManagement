@@ -1,6 +1,9 @@
 #include "userMode-AWE-pageFile.h"
 #include "enqueue-dequeue.h" 
 #include "getPage.h"
+#include "PTEpermissions.h"
+#include "jLock.h"
+#include "pageFile.h"
 
 // Array used to convert PTEpermissions enum to standard windows permissions
 DWORD windowsPermissions[] = { PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE };
@@ -73,6 +76,15 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     PPFNdata transitionPFN;
     transitionPFN = PFNarray + pageNum;
 
+    acquireJLock(&transitionPFN->lockBits);
+
+    if (transitionPFN->statusBits != STANDBY && transitionPFN->statusBits != MODIFIED) {
+        
+        releaseJLock(&(transitionPFN->lockBits));
+        PRINT("[transPageFault] - page has changed state. Retrying\n");
+        return PAGE_STATE_CHANGE;           // TODO - make sure caller handles this.
+
+    }
 
     // if attempting to write, set dirty bit & clear PF location if it exists
     if (permissionMasks[RWEpermissions] & writeMask) { 
@@ -80,20 +92,20 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         // set PTE to dirty
         newPTE.u1.hPTE.dirtyBit = 1;
 
-        // TODO - do not clear if Write in progress bit set
-        // free PF location
-        clearPFBitIndex(transitionPFN->pageFileOffset);
+
+        // free PF location if not currently being written out
+        if (transitionPFN->writeInProgressBit == 0) {
+            // todo - window where write in progress could be set (needs to be locked)
+           clearPFBitIndex(transitionPFN->pageFileOffset);
+        }
 
         // clear pagefile pointer out of PFN
         transitionPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
     } else {
-
-        PPFNdata metadata;
-        metadata = PFNarray + pageNum;
         
         // if PFN is modified, maintain dirty bit when switched back
-        if (metadata->statusBits == MODIFIED) {
+        if (transitionPFN->statusBits == MODIFIED) {
             newPTE.u1.hPTE.dirtyBit = 1;
         }
         
@@ -102,7 +114,6 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
     // copy permissions from transition PTE into our soon-to-be-active PTE
     transferPTEpermissions(&newPTE, transRWEpermissions);
-
 
     // only dequeue if write in progress bit is zero
     if (transitionPFN->writeInProgressBit == 0) {
@@ -131,15 +142,19 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     // compiler writes out as indivisible store
     * (volatile PTE *) masterPTE = newPTE;
 
+    // TODO - reduce lock duration/ increase multithreading granularity
+
     DWORD oldPermissions;
 
-    // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a lack of permissions protection
+    // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a brief lack of permissions protection
 
     // assign VA to point at physical page, mirroring our local PTE change
     MapUserPhysicalPages(virtualAddress, 1, &pageNum);
 
     // update physical permissions of hardware PTE to match our software reference.
     VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[transRWEpermissions], &oldPermissions);
+
+    releaseJLock(&transitionPFN->lockBits);
 
     return SUCCESS;
 

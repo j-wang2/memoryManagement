@@ -12,6 +12,7 @@
 #include "PTEpermissions.h"
 #include "VApermissions.h"
 #include "pageFault.h"
+#include "jLock.h"
 
 
 /******* GLOBALS *****/
@@ -78,7 +79,7 @@ getPTE(void* virtualAddress)
 BOOLEAN
 trimPage(void* virtualAddress)
 {
-    PRINT("trimming page with VA %llu\n", (ULONG_PTR) virtualAddress);
+    PRINT("[trimPage] trimming page with VA %llu\n", (ULONG_PTR) virtualAddress);
 
     PPTE PTEaddress;
     PTEaddress = getPTE(virtualAddress);
@@ -94,16 +95,9 @@ trimPage(void* virtualAddress)
 
     // check if PTE's valid bit is set - if not, can't be trimmed and return failure
     if (oldPTE.u1.hPTE.validBit == 0) {
-        PRINT_ERROR("could not trim VA %llu - PTE is not valid\n", (ULONG_PTR) virtualAddress);
+        PRINT("could not trim VA %llu - PTE is not valid\n", (ULONG_PTR) virtualAddress);
         return FALSE;
     }
-
-    // zero new PTE
-    PTE PTEtoTrim;
-    PTEtoTrim.u1.ulongPTE = 0;
-
-    // unmap page from VA (invalidates hardwarePTE)
-    MapUserPhysicalPages(virtualAddress, 1, NULL);
 
     // get pageNum
     ULONG_PTR pageNum;
@@ -113,19 +107,62 @@ trimPage(void* virtualAddress)
     PPFNdata PFNtoTrim;
     PFNtoTrim = PFNarray + pageNum;
 
-    // check dirtyBit to see if page has been modified
-    if (oldPTE.u1.hPTE.dirtyBit == 0) {
+    acquireJLock(&PFNtoTrim->lockBits);
 
-        // add given VA's page to standby list
-        enqueuePage(&standbyListHead, PFNtoTrim);
+    if (oldPTE.u1.ulongPTE != PTEaddress->u1.ulongPTE) {
+        releaseJLock(&PFNtoTrim->lockBits);
+        PRINT("[trimPage] PTE has been changed\n");
+        return FALSE;
+    }
 
-    } 
-    else if (oldPTE.u1.hPTE.dirtyBit == 1) {
+    if (PFNtoTrim->statusBits != ACTIVE) {
+        releaseJLock(&PFNtoTrim->lockBits);
+        PRINT("[trimPage] page has already been trimmed\n");
+        return FALSE;
+    }
 
-        // add given VA's page to modified list;
-        enqueuePage(&modifiedListHead, PFNtoTrim);
+
+    // zero new PTE
+    PTE PTEtoTrim;
+    PTEtoTrim.u1.ulongPTE = 0;
+
+
+    // unmap page from VA (invalidates hardwarePTE)
+    MapUserPhysicalPages(virtualAddress, 1, NULL);
+
+    // if write in progress bit is set, modified writer re-enqueues page
+    if (PFNtoTrim->writeInProgressBit == 1) {
+
+        if (oldPTE.u1.hPTE.dirtyBit == 0) {
+            PFNtoTrim->statusBits = STANDBY;
+        }
+
+        else if (oldPTE.u1.hPTE.dirtyBit == 1) {
+            
+            // to notify modified writer that page has since been re-modified
+            PFNtoTrim->remodifiedBit = 1;
+
+            PFNtoTrim->statusBits = MODIFIED;
+
+        }
 
     }
+    else {
+        // check dirtyBit to see if page has been modified
+        if (oldPTE.u1.hPTE.dirtyBit == 0) {
+
+            // add given VA's page to standby list
+            enqueuePage(&standbyListHead, PFNtoTrim);
+
+        } 
+        else if (oldPTE.u1.hPTE.dirtyBit == 1) {
+
+            // add given VA's page to modified list;
+            enqueuePage(&modifiedListHead, PFNtoTrim);
+
+        }
+    }
+
 
     // set transitionBit to 1
     PTEtoTrim.u1.tPTE.transitionBit = 1;  
@@ -134,6 +171,8 @@ trimPage(void* virtualAddress)
     PTEtoTrim.u1.tPTE.permissions = getPTEpermissions(oldPTE);
 
     * (volatile PTE *) PTEaddress = PTEtoTrim;
+
+    releaseJLock(&PFNtoTrim->lockBits);
 
     return TRUE;
 
@@ -280,7 +319,7 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
         totalCommittedPages++; 
 
         // add page to free list
-        enqueuePage(&freeListHead, newPFN);       
+        enqueuePage(&freeListHead, newPFN);     // TODO - although no lock is needed functionally, adjust if an assert is added into enqueue    
 
     }
 
@@ -362,7 +401,9 @@ zeroPageWriter()
     //  PRINT("freeListCount == %llu\n", freeListHead.count);
 
     PPFNdata PFNtoZero;
-    PFNtoZero = dequeuePage(&freeListHead);
+
+    // lock whole list (to avoid other threads pulling at same times)
+    PFNtoZero = dequeueLockedPage(&freeListHead, FALSE);
 
 
     if (PFNtoZero == NULL) {
@@ -377,8 +418,14 @@ zeroPageWriter()
     // zeroPage (does not update status bits in PFN metadata)
     zeroPage(pageNumtoZero);
 
+    acquireJLock(&PFNtoZero->lockBits);
+
     // enqueue to zeroList (updates status bits in PFN metadata)
     enqueuePage(&zeroListHead, PFNtoZero);
+
+    releaseJLock(&PFNtoZero->lockBits);
+
+    // TODO - unlock page after move
     //  PRINT(" - Moved page from free -> zero \n");
 
     return TRUE;
@@ -428,7 +475,7 @@ freePageTestWriter()
     // PRINT("zeroListCount == %llu\n", zeroListHead.count);
 
     PPFNdata PFNtoFree;
-    PFNtoFree = dequeuePage(&zeroListHead);
+    PFNtoFree = dequeueLockedPage(&zeroListHead, FALSE);
 
 
     if (PFNtoFree == NULL) {
@@ -436,8 +483,12 @@ freePageTestWriter()
         return FALSE;
     }
 
+    acquireJLock(&PFNtoFree->lockBits);
+
     // enqueue to freeList (updates status bits in PFN metadata)
     enqueuePage(&freeListHead, PFNtoFree);
+    releaseJLock(&PFNtoFree->lockBits);
+
 
     //  PRINT(" - Moved page from zero -> free \n");
 
@@ -490,7 +541,8 @@ modifiedPageWriter()
     PPFNdata PFNtoWrite;
 
 
-    PFNtoWrite = dequeuePage(&modifiedListHead);
+    // return page that is locked
+    PFNtoWrite = dequeueLockedPage(&modifiedListHead, TRUE);
 
 
     if (PFNtoWrite == NULL) {
@@ -499,54 +551,107 @@ modifiedPageWriter()
     }
 
 
-    // set write in progress bit to 1
+    // lock has previuosly been acquired - set write in progress bit to 1
+    ASSERT(PFNtoWrite->writeInProgressBit == 0);
     PFNtoWrite->writeInProgressBit = 1;
 
+    // revert PFN status to modified so that it can once again be faulted
+    PFNtoWrite->statusBits = MODIFIED;
 
-    // write page out
+    ASSERT(PFNtoWrite->pageFileOffset == INVALID_PAGEFILE_INDEX);
+    
+    releaseJLock(&PFNtoWrite->lockBits);
+
+
+    // write page out - can no longer be accessed since write in progress is one
     BOOLEAN bResult;
     bResult = writePageToFileSystem(PFNtoWrite);
 
+    // Acquire lock to view PFN
+    acquireJLock(&PFNtoWrite->lockBits);
 
-    if (bResult != TRUE) {
-        PRINT_ERROR("[modifiedPageWriter] error writing out page\n");
-        enqueuePage(&modifiedListHead, PFNtoWrite);                     // TODO - CHECK (reenqueing if unable to write)
-        return FALSE;
-    }
-
-
-    // PFN status to standby (from modified)
-    PFNtoWrite->statusBits = STANDBY;
-
-
-    // enqueue page to standby
-    enqueuePage(&standbyListHead, PFNtoWrite);
-
-
-    // clear write in progress bit (since page has both been written and re-enqueued)
-    PFNtoWrite->writeInProgressBit = 0;
-
-    PRINT(" - Moved page from modified -> standby (wrote out to PageFile successfully)\n");
-
-
-    // check PTE dirty bit - if it has been set again, it is now dirty and we can clear the PF index
-    // also need to clear if it has been faulted in, and trimmed again back to modified
-    PPTE currPTE;
-    currPTE = PTEarray + PFNtoWrite->PTEindex;
-
-    // clear pf index out of PFN and control array
-    if ( ( currPTE->u1.hPTE.validBit == 1 && currPTE->u1.hPTE.dirtyBit == 1) || PFNtoWrite->statusBits == MODIFIED) {
-
-        // free PF location from PFN
+    // check if PFN has been decommitted
+    if (PFNtoWrite->statusBits == AWAITING_FREE) {
+        
+        ASSERT(FALSE);          // TEMP TODO : check this (someone has decommitted in meantime). delete after fixed
+        ASSERT(PFNtoWrite->pageFileOffset != INVALID_PAGEFILE_INDEX);
+            
         clearPFBitIndex(PFNtoWrite->pageFileOffset);
 
-        // clear pagefile pointer out of PFN
         PFNtoWrite->pageFileOffset = INVALID_PAGEFILE_INDEX;
-        
-        PRINT(" - Page has since been write faulted (discarding PF space)\n");
 
+        // enqueue Page to free list
+        enqueuePage(&freeListHead, PFNtoWrite);
+
+        releaseJLock(&PFNtoWrite->lockBits);
+
+        PRINT("[modifiedPageWriter] VA decommitted during PF write\n");
+        return TRUE;
     }
 
+
+    // if write failed or the PFN has since been modified
+    if (bResult != TRUE || PFNtoWrite->remodifiedBit == 1) {
+            
+        ASSERT(PFNtoWrite->pageFileOffset != INVALID_PAGEFILE_INDEX);
+            
+        clearPFBitIndex(PFNtoWrite->pageFileOffset);
+
+        PFNtoWrite->pageFileOffset = INVALID_PAGEFILE_INDEX;
+
+
+        if (PFNtoWrite->statusBits != ACTIVE) {
+            enqueuePage(&modifiedListHead, PFNtoWrite);                     // TODO - CHECK (reenqueing if unable to write)
+        }
+        
+        releaseJLock(&PFNtoWrite->lockBits);
+
+        if (bResult != TRUE) {
+            PRINT_ERROR("[modifiedPageWriter] error writing out page\n");
+        }  else {
+           PRINT("[modifiedPageWriter] Page has since been modified, clearing PF space\n");
+        }
+        
+        return TRUE;
+    }
+
+
+    // currPTE must be "good" since PFN has not been decommited (we hold lock)
+    // can be either valid or transition (dangling since we hold write in progress bit)
+    PPTE currPTE;
+    currPTE = PTEarray + PFNtoWrite->PTEindex;    
+
+
+    if (PFNtoWrite->statusBits != ACTIVE) {
+        ASSERT(currPTE->u1.hPTE.validBit != 1 && currPTE->u1.tPTE.transitionBit == 1);
+
+        // enqueue page to standby (since has not been redirtied)
+        enqueuePage(&standbyListHead, PFNtoWrite);
+
+        PRINT(" - Moved page from modified -> standby (wrote out to PageFile successfully)\n");
+
+
+    } else {
+        ASSERT(currPTE->u1.hPTE.validBit == 1);
+
+        if (currPTE->u1.hPTE.dirtyBit == 1) {
+
+            // free PF location from PFN
+            clearPFBitIndex(PFNtoWrite->pageFileOffset);
+
+            // clear pagefile pointer out of PFN
+            PFNtoWrite->pageFileOffset = INVALID_PAGEFILE_INDEX;
+            
+            PRINT(" - Page has since been write faulted (discarding PF space)\n");
+
+        }
+    }
+
+    // clear write in progress bit (since page has both been written and re-enqueued)
+
+    PFNtoWrite->writeInProgressBit = 0;
+
+    releaseJLock(&PFNtoWrite->lockBits);
 
     return TRUE;   
 
@@ -913,6 +1018,7 @@ testRoutine()
         pageCount += listHeads[i].count;
     }
     PRINT_ALWAYS("total page count %llu\n", pageCount);
+
 }
 
 

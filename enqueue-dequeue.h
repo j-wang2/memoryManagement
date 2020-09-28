@@ -37,6 +37,7 @@ enqueuePage(PlistData listHead, PPFNdata PFN);
 
 /*
  * dequeuePage: function to dequeue an item from the head of a specified list
+ *  - Caller must pre-acquire locks
  *  - checks number of available pages, running modified writer if low (TODO: add active trimming as well)
  * 
  * Returns PLIST_ENTRY
@@ -45,6 +46,9 @@ enqueuePage(PlistData listHead, PPFNdata PFN);
  */
 PPFNdata
 dequeuePage(PlistData listHead);
+
+PPFNdata
+dequeueLockedPage(PlistData listHead, BOOLEAN returnLocked);
 
 
 /*

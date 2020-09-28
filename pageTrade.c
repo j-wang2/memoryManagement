@@ -1,8 +1,9 @@
 #include "userMode-AWE-pageFile.h"
 #include "enqueue-dequeue.h"
 #include "getPage.h"
+#include "pageFault.h"
 
-VOID
+BOOLEAN
 tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)
 {
 
@@ -10,14 +11,28 @@ tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)
     PPFNdata pageToTrade;
     pageToTrade = PFNarray + PFNtoTrade;
 
+    acquireJLock(&(pageToTrade->lockBits));
+
+    if (pageToTrade->statusBits != FREE && pageToTrade->statusBits != ZERO) {
+
+        releaseJLock(&(pageToTrade->lockBits));
+        PRINT ("[tradeFreeOrZeroPage] Page is no longer on free or zero list\n");
+        return FALSE;
+
+    }
     // dequeue from current list
     dequeueSpecificPage(pageToTrade);
 
     // sets status bits also
     enqueuePage(&quarantineListHead, pageToTrade);
 
+    // release lock
+    releaseJLock(&(pageToTrade->lockBits));
+
     // increment commit count, since this page is now out of circulation
-    totalCommittedPages++;
+    totalCommittedPages++;  // TODO- CHECK COMMIT COUNT
+
+    return TRUE;
 
 }
 
@@ -64,8 +79,18 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     PPFNdata pageToTrade;
     pageToTrade = PFNarray + PFNtoTrade;
 
+    acquireJLock(&(pageToTrade->lockBits));
+
     PFNstatus currStatus;
     currStatus = pageToTrade->statusBits;
+
+    if (currStatus != STANDBY && currStatus != MODIFIED){
+
+        releaseJLock(&(pageToTrade->lockBits));
+        PRINT ("[tradeTransitionPage] Page is no longer on standby or modified list\n");
+
+        return FALSE;
+    }
 
     // dequeue from current list
     dequeueSpecificPage(pageToTrade);
@@ -81,10 +106,13 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     copyRes = copyPage(newPFN, PFNtoTrade);
 
     if (copyRes == FALSE) {
+
         PRINT_ERROR("[tradeTransitionPage] error in page copying\n");
         return FALSE;
+
     }
 
+    acquireJLock(&newPage->lockBits);
 
     // enqueue replacement page onto list
     enqueuePage(&listHeads[currStatus], newPage);
@@ -102,8 +130,12 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     newPage->pageFileOffset = pageToTrade->pageFileOffset;
     newPage->refCount = pageToTrade->refCount;         
 
+    releaseJLock(&newPage->lockBits);
+
     // sets status bits
     enqueuePage(&quarantineListHead, pageToTrade);
+
+    releaseJLock(&(pageToTrade->lockBits));
 
     // increment commit count, since this page is now out of circulation (in addition to the one that is just brought in)
     totalCommittedPages++;
@@ -116,6 +148,12 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
 BOOLEAN
 tradeVA(PVOID virtualAddress)
 {
+    // TODO - need to lock totalCommittedPages
+    if (totalCommittedPages >= totalMemoryPageLimit) {
+        PRINT("[tradeVA] no remaining memory\n");
+        return FALSE;
+    }
+
     PPTE currPTE;
     currPTE = getPTE(virtualAddress);
 

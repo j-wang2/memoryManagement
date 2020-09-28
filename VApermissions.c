@@ -1,4 +1,10 @@
 #include "userMode-AWE-pageFile.h"
+#include "pageFault.h"
+#include "pageFile.h"
+#include "PTEpermissions.h"
+#include "enqueue-dequeue.h"
+#include "jLock.h"
+
 
 faultStatus 
 accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions) 
@@ -262,13 +268,22 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
             // unmap VA from page
             MapUserPhysicalPages(startVA, 1, NULL);
 
-            // if the PFN contents is also stored in pageFile
-            if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
-                clearPFBitIndex(currPFN->pageFileOffset);
+            if (currPFN->writeInProgressBit == 1) {
+
+                currPFN->statusBits = AWAITING_FREE;
+                
+            }
+            else {
+                // if the PFN contents is also stored in pageFile
+                if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
+                    clearPFBitIndex(currPFN->pageFileOffset);
+                }
+
+                // enqueue Page to free list
+                enqueuePage(&freeListHead, currPFN);        // TODO 
             }
 
-            // enqueue Page to free list
-            enqueuePage(&freeListHead, currPFN);
+
 
         } 
         else if (tempPTE.u1.tPTE.transitionBit == 1) {                  // transition format
@@ -278,16 +293,46 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
             currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
 
 
-            // dequeue from standby/modified list
-            dequeueSpecificPage(currPFN);
-            
-            // if the PFN contents is also stored in pageFile
-            if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
-                clearPFBitIndex(currPFN->pageFileOffset);
-            }
+            acquireJLock(&currPFN->lockBits);
 
-            // enqueue Page to free list
+            // verify is still transition and pointed to by PTE index
+            if ( (currPFN->statusBits != STANDBY && currPFN->statusBits != MODIFIED)
+            || currPFN->PTEindex != (ULONG64) (currPTE - PTEarray) ) {
+                
+                releaseJLock(&currPFN->lockBits);
+                PRINT("[decommitVA] currPFN has changed\n");
+
+                // reprocess same PTE since it has since been changed
+                currPTE--;
+                continue;
+
+            }
+            
+            // only dequeue if write in progress bit is zero
+
+            if (currPFN->writeInProgressBit == 1) {
+
+                currPFN->statusBits = AWAITING_FREE;
+
+            }
+            else { 
+                // dequeue from standby/modified list
+                dequeueSpecificPage(currPFN);
+
+                // if the PFN contents are also stored in pageFile
+                if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
+                    clearPFBitIndex(currPFN->pageFileOffset);
+                }
+            }
+           
+            
+
+
+            
+            // enqueue Page to free list (setting status bits in process)
             enqueuePage(&freeListHead, currPFN);
+
+            releaseJLock(&currPFN->lockBits);
 
         }  
         else if (tempPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {     // pagefile format

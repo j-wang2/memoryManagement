@@ -87,7 +87,9 @@ typedef struct _PFNdata {
     ULONG64 pageFileOffset: PAGEFILE_BITS;
     ULONG64 PTEindex: PTE_INDEX_BITS;
     ULONG64 writeInProgressBit: 1;
-    ULONG64 refCount: 16;          
+    ULONG64 refCount: 16;
+    ULONG64 remodifiedBit: 1;        
+    volatile LONG lockBits;                // 31 free bits if necessary
 } PFNdata, *PPFNdata;
 
 typedef struct _listData {
@@ -112,7 +114,9 @@ typedef enum {          // DO NOT EDIT ORDER without checking enqueue/dequeue
     STANDBY,            // 2
     MODIFIED,           // 3
     QUARANTINE,         // 4
-    ACTIVE,             // 5
+    NONE,               // 5 (transitioning between states)
+    AWAITING_FREE,      // 6
+    ACTIVE,             // 7 (ACTIVE must be last since it is used to dimensionalize arrays)
 } PFNstatus;
 
 typedef enum {
@@ -128,6 +132,7 @@ typedef enum {
     SUCCESS,            // 0
     ACCESS_VIOLATION,   // 1
     NO_FREE_PAGES,      // 2
+    PAGE_STATE_CHANGE,  // 3
 } faultStatus;
 
 typedef enum {
