@@ -414,7 +414,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         return status;
 
     }
-    else if (oldPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {          // PAGEFILE STATE PTE
+    else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS && oldPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {          // PAGEFILE STATE PTE
 
         status = pageFilePageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);  
         return status;
@@ -431,7 +431,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         // TODO (future): may need to check if vad is mem commit and bring in permissions
         // status = checkVADPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
 
-        PRINT_ERROR("access violation - PTE is zero\n");
+        PRINT("access violation - PTE is zero\n");
         return ACCESS_VIOLATION;
 
     }

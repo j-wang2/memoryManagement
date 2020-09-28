@@ -10,27 +10,44 @@
 #pragma comment(lib, "Advapi32.lib")
 
 
+/*********** temporary testing macros ************/
+// #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
+#define TEMP_TESTING
 #define NUM_ZERO_THREADS 3
+#define TESTING_ZERO
+#define TESTING_MODIFIED
 
 
+/*********** number of physical memory pages to allocate (+ PF pages for total memory) **********/
+// #define NUM_PAGES 30
 #define NUM_PAGES 512
 // #define NUM_PAGES 6400000
 
-// #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
+#define VM_MULTIPLIER 10                            // VM space is this many times larger than num physical pages successfully allocated
 
-#define PERMISSIONS_BITS 3
 
+
+/********** PTE bit macros *************/
+#define PERMISSIONS_BITS 3                          // bits in non-valid PTE formats reserved for permissions
 #define PTE_INDEX_BITS 9                            // log2(NUM_PAGES)
-#define PAGE_SIZE 4096                              // page size
-#define PAGE_SHIFT 12                               // number of bits to multiply/divide by page size
 #define PFN_BITS 40                                 // number of bits to store PFN index
 
-#define PAGEFILE_PAGES 512                          // capacity of pagefile pages
+
+/************ page size macros ***********/
+#define PAGE_SIZE 4096                              // page size
+#define PAGE_SHIFT 12                               // number of bits to multiply/divide by page size (log2 page size)
+
+
+/*********** pagefile macros ***************************/
+#define PAGEFILE_PAGES 512                          // capacity of pagefile pages (+ NUM_PAGES for total memory)
 #define PAGEFILE_SIZE PAGEFILE_PAGES*PAGE_SIZE      // total pagefile size 
 #define PAGEFILE_BITS 20                            // actually 2^19 currently
 #define INVALID_PAGEFILE_INDEX 0xfffff              // 20 bits (MUST CORRESPOND TO PAGEFILE BITS)
 
+
+/**************** assert macro *****************/
 #define ASSERT(x) if((x) == FALSE) DebugBreak()
+
 
 /***************** print macros ******************/
 #define PRINT(fmt, ...) if (debugMode == TRUE) { printf(fmt, __VA_ARGS__); }                // verify this works

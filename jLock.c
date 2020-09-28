@@ -6,10 +6,7 @@
 
 #define NUM_LOOPS 1000000000
 
-#define NUM_HANDLES 4
-
-volatile int counter;
-
+#include "jlock.h"
 
 VOID
 acquireJLock(volatile PLONG lock)

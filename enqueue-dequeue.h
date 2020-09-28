@@ -27,9 +27,9 @@ VOID
 enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem);
 
 /*
- * enqueuePage: wrapper function for enqueue PFN to head of specified list
+ * enqueuePage: SYNCHRONIZED wrapper function for enqueue PFN to head of specified list
  *  - also updates pageCount and the statusBits of the PFN that has just been enqueued
- * 
+ *  - expects page lock to be held upon call, acquires and releases listhead lock
  * No return value
  */
 VOID
@@ -40,13 +40,26 @@ enqueuePage(PlistData listHead, PPFNdata PFN);
  *  - Caller must pre-acquire locks
  *  - checks number of available pages, running modified writer if low (TODO: add active trimming as well)
  * 
- * Returns PLIST_ENTRY
- *  - PLIST_ENTRY returnItem on success
+ * Returns PPFNdata
+ *  - PPFNdata returnPFN on success
  *  - NULL on failure (empty list)
  */
 PPFNdata
 dequeuePage(PlistData listHead);
 
+
+/*
+ * dequeueLockedPage: SYNCHRONIZED function to dequeue an item from head (adapted for multithreading)
+ *  - "peeks" at top item, locks it, and then checks that it has not since been pulled off
+ *  - no locks should be held upon call
+ *  - acquires page lock, then list lock
+ *  - BOOLEAN returnLocked flag can be set to true to not release page lock
+ * 
+ * Returns PPFNdata
+ *  - PPFNdata returnPFN on success (can be either unlocked or locked depending on returnLocked param)
+ *  - NULL on empty list
+ * 
+ */
 PPFNdata
 dequeueLockedPage(PlistData listHead, BOOLEAN returnLocked);
 
@@ -75,10 +88,11 @@ dequeueSpecific(PLIST_ENTRY removeItem);
 
 
 /*
- * dequeueSpecificPage: wrapper function for dequeueSpecific that takes a PPFN as the param
+ * dequeueSpecificPage: SYNCHRONIZED wrapper function for dequeueSpecific that takes a PPFN as the param
  *  - also decrements count for a list
  *  - does NOT change the PFN's status bits itself
  *  - checks number of available pages, running modified writer if low (TODO: add active trimming as well)
+ *  - EXPECTS page lock to be held upon call, acquires and releases listhead lock
  * 
  * No return value
  */

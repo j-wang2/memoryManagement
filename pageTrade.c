@@ -2,6 +2,7 @@
 #include "enqueue-dequeue.h"
 #include "getPage.h"
 #include "pageFault.h"
+#include "jLock.h"
 
 BOOLEAN
 tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)

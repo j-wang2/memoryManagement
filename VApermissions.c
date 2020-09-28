@@ -16,6 +16,51 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
 
     while (PFstatus == SUCCESS) {
 
+#ifdef TEMP_TESTING
+
+        PPTE currPTE;
+        currPTE = getPTE(virtualAddress);
+
+        PTE snapPTE;
+        snapPTE = *currPTE;
+
+        if (snapPTE.u1.hPTE.validBit == 1) {
+            ULONG_PTR currPFNindex;
+
+            currPFNindex = snapPTE.u1.hPTE.PFN;
+
+            PPFNdata currPFN;
+            currPFN = PFNarray + currPFNindex;
+
+            acquireJLock(&currPFN->lockBits);
+
+
+            if (snapPTE.u1.ulongPTE == currPTE->u1.ulongPTE) {
+                PTEpermissions tempRWEpermissions = getPTEpermissions(snapPTE);
+                if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {
+
+                    releaseJLock(&currPFN->lockBits);
+                    PFstatus = pageFault(virtualAddress, RWEpermissions);
+                    PRINT_ERROR("Invalid permissions\n");
+                    return PFstatus;
+
+                } 
+
+                releaseJLock(&currPFN->lockBits);
+                return SUCCESS;
+            }
+            else {
+                releaseJLock(&currPFN->lockBits);
+
+                continue;
+            }
+
+        } else {
+            PFstatus = pageFault(virtualAddress, RWEpermissions);
+        }
+
+
+#else
         _try {
 
             if (RWEpermissions == READ_ONLY || READ_EXECUTE) {
@@ -39,7 +84,7 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
             PFstatus = pageFault(virtualAddress, RWEpermissions);
 
         }
-
+#endif
     }
 
     return PFstatus;
@@ -135,7 +180,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         
         } else {
             // no remaining pages
-            PRINT_ERROR("[commitVA] no remaining pages - unable to commit PTE\n");
+            PRINT("[commitVA] no remaining pages - unable to commit PTE\n");
             return FALSE;
         }
 
@@ -196,7 +241,7 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
         }
         else {
 
-            PRINT("PTE is not already valid, transition, or demand zero\n");
+            PRINT("[protectVA] PTE is not already valid, transition, or demand zero\n");
             continue;
 
         }

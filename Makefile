@@ -11,7 +11,7 @@ SOURCES = $(CURRPROG).c enqueue-dequeue.c pageFault.c pageFile.c getPage.c PTEpe
 
 
 CFLAGS = /DEBUG:FULL /Zi
-WFLAGS = /W4 /wd4214 /wd4127
+WFLAGS = /W4 /wd4214 /wd4127 /wd4090
 CC = cl
 MAKE = make
 DEL = del /Q		## for windows makefile

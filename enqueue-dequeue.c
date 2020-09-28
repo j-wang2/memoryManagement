@@ -6,7 +6,7 @@ checkAvailablePages(PFNstatus dequeuedStatus)
 {
 
     // conditional covers zero, free, and standby (since they are smaller in the enum)
-    if (dequeuedStatus <= STANDBY){
+    if (dequeuedStatus <= STANDBY) {
 
         // calculate available pages
         ULONG_PTR availablePageCount;
@@ -14,7 +14,7 @@ checkAvailablePages(PFNstatus dequeuedStatus)
 
     
         if (availablePageCount < 10) {
-            modifiedPageWriter();               // TODO: COMMENTED OUT FOR NOW need to check ret val?
+            modifiedPageWriter();               // TODO: need to check ret val?
         }
 
     }
@@ -33,7 +33,7 @@ enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem)
     newItem->Flink = prevFirst;
     prevFirst->Blink = newItem;
 
-    return; // should I haave a return value?
+    return;
 }
 
 
@@ -163,7 +163,6 @@ dequeueLockedPage(PlistData listHead, BOOLEAN returnLocked)
 
     return returnPFN;
 }
-
 
 
 PPFNdata

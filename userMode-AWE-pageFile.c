@@ -45,9 +45,6 @@ listData VADListHead;               // list of VADs
 
 BOOLEAN debugMode;
 
-#define TESTING_ZERO
-#define TESTING_MODIFIED
-
 
 PPTE
 getPTE(void* virtualAddress)
@@ -276,8 +273,9 @@ initVABlock(ULONG_PTR numPages, ULONG_PTR pageSize)
         exit(-1);
     }
 
-    // TODO - do i need to avoid overflow?
-    leafVABlockEnd = (PVOID) ( (ULONG_PTR)leafVABlock + NUM_PAGES*PAGE_SIZE );
+    // TODO - do i need to avoid overflow? Which of these should it be
+    leafVABlockEnd = (PVOID) ( (ULONG_PTR)leafVABlock + numPages*PAGE_SIZE );
+
 
 }
 
@@ -592,8 +590,8 @@ modifiedPageWriter()
 
     // if write failed or the PFN has since been modified
     if (bResult != TRUE || PFNtoWrite->remodifiedBit == 1) {
-            
-        ASSERT(PFNtoWrite->pageFileOffset != INVALID_PAGEFILE_INDEX);
+        
+        ASSERT(PFNtoWrite->pageFileOffset != INVALID_PAGEFILE_INDEX);           // TODO - error here with bResult != TRUE (leaked a page)
             
         clearPFBitIndex(PFNtoWrite->pageFileOffset);
 
@@ -813,7 +811,8 @@ testRoutine()
     PRINT_ALWAYS("[testRoutine]\n");
     
     /************** TESTING *****************/
-    void* testVA = leafVABlock;
+    void* testVA;
+    testVA = leafVABlock;
 
 
     PRINT_ALWAYS("--------------------------------\n");
@@ -821,7 +820,8 @@ testRoutine()
 
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
-    ULONG_PTR testNum = 100;
+    ULONG_PTR testNum = NUM_PAGES * VM_MULTIPLIER;      //TEMPORARY
+
     PRINT_ALWAYS("Committing and then faulting in %llu pages\n", testNum);
 
 
@@ -829,22 +829,12 @@ testRoutine()
 
         faultStatus testStatus;
 
-        commitVA(testVA, READ_ONLY, PAGE_SIZE*3);    // commits with READ_ONLY permissions
-        protectVA(testVA, READ_WRITE, PAGE_SIZE *3);   // converts to read write
+        commitVA(testVA, READ_ONLY, PAGE_SIZE);    // commits with READ_ONLY permissions
+        protectVA(testVA, READ_WRITE, PAGE_SIZE);   // converts to read write
 
-        // commitVA(testVA, READ_WRITE, 1);    // commits with read/write permissions (VirtualProtect does not allow execute permissions)
         testStatus = writeVA(testVA, testVA);
-    
-        // if (i % 2 == 1) {
-
-        //     // write VA to the VA location (should remain same throughout entire course of program despite physical page changes)
-        //     testStatus = writeVA(testVA, testVA);
-
-        // } else {
-
-        //     testStatus = accessVA(testVA, READ_ONLY);
             
-        // }
+        // trimPage(testVA);
 
         /************ TRADING pages ***********/
 
@@ -856,6 +846,8 @@ testRoutine()
 
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
+
+        // iterate to next VA
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
 
     }
@@ -878,18 +870,14 @@ testRoutine()
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
 
 
-        // #ifndef MULTITHREADING                      // TODO: move when we have modifiedpagewriter thread
+        #ifndef MULTITHREADING                      // TODO: move when we have modifiedpagewriter thread
 
-        #ifndef TESTING_MODIFIED
         // alternate calling modifiedPageWriter and zeroPageWriter
         if (i % 2 == 0) {
 
             modifiedPageWriter();
 
         } 
-        #endif
-
-        #ifndef MULTITHREADING                      // TODO: move when we have modifiedpagewriter thread
 
         else {
             
@@ -978,6 +966,7 @@ testRoutine()
 
         faultStatus testStatus = pageFault(testVA, READ_WRITE);        // to TEST VAs
         // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
+
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
     }
@@ -989,7 +978,7 @@ testRoutine()
 
     for (int i = 0; i < testNum; i++) {
 
-        decommitVA(testVA, PAGE_SIZE*3);
+        decommitVA(testVA, PAGE_SIZE);
 
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
     }
@@ -1050,7 +1039,7 @@ main(int argc, char** argv)
     // memset the pageFile bit array
     memset(&pageFileBitArray, 0, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );
 
-    // allocate an array of PFNs that are returned by AllocateUserPhysPages
+    // allocate an array of PFNs that is returned by AllocateUserPhysPages
     ULONG_PTR *aPFNs;
     aPFNs = VirtualAlloc(NULL, NUM_PAGES*(sizeof(ULONG_PTR)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     
@@ -1066,10 +1055,13 @@ main(int argc, char** argv)
         exit(-1);
     }    
 
-    BOOLEAN bResult;
 
-    ULONG_PTR numPagesReturned = NUM_PAGES;
+    ULONG_PTR numPagesReturned;
+    numPagesReturned = NUM_PAGES;
+    
+    BOOLEAN bResult;
     bResult = (BOOLEAN) AllocateUserPhysicalPages(GetCurrentProcess(), &numPagesReturned, aPFNs);
+
     if (bResult != TRUE) {
         PRINT_ERROR("could not allocate pages successfully \n");
         exit(-1);
@@ -1079,20 +1071,29 @@ main(int argc, char** argv)
         PRINT("allocated only %llu pages out of %u pages requested\n", numPagesReturned, NUM_PAGES);
     }
 
-    // create VAD
-    initVABlock(numPagesReturned, PAGE_SIZE);     // will be the starting VA of the memory I've allocated
+    // to achieve a greater VM address range than PM would otherwise allow
+    ULONG_PTR virtualMemPages;
+    virtualMemPages = numPagesReturned * VM_MULTIPLIER;         // TODO - clean this up
+
+
+    /******************* initialize data structures ****************/
+
+    // create virtual address block
+    initVABlock(virtualMemPages, PAGE_SIZE);
 
     // create local PFN metadata array
     initPFNarray(aPFNs, numPagesReturned);
 
     // create local PTE array to map VAs to pages
-    initPTEarray(numPagesReturned);
+    initPTEarray(virtualMemPages);
 
     // create PageFile section of memory
     initPageFile(PAGEFILE_SIZE);
 
-    // call test routine
+
+    /******************** call test routine ******************/
     testRoutine();
+
 
     PRINT_ALWAYS("----------------\nprogram complete\n----------------");
 
