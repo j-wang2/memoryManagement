@@ -15,6 +15,7 @@ checkAvailablePages(PFNstatus dequeuedStatus)
     
         if (availablePageCount < 10) {
             modifiedPageWriter();               // TODO: need to check ret val?
+            
         }
 
     }
@@ -122,7 +123,7 @@ dequeueLockedPage(PlistData listHead, BOOLEAN returnLocked)
         headLink = (listHead->head).Flink;
 
         if (headLink == &(listHead->head) ) {
-            PRINT("List is empty - page cannot be dequeued\n");
+            PRINT("[dequeueLockedPage] List is empty - page cannot be dequeued\n");
             return NULL;
         }
 
@@ -213,6 +214,63 @@ dequeuePageFromTail(PlistData listHead)
     checkAvailablePages(returnPFN->statusBits);
 
     return returnPFN;
+}
+
+
+PPFNdata
+dequeueLockedPageFromTail(PlistData listHead, BOOLEAN returnLocked)
+{
+    PLIST_ENTRY tailLink;
+    PPFNdata tailPFN;
+
+    while (TRUE) {
+
+        // check listhead Blink
+        tailLink = (listHead->head).Blink;
+
+        if (tailLink == &(listHead->head) ) {
+            PRINT("[dequeueLockedPageFromTail] List is empty - page cannot be dequeued\n");
+            return NULL;
+        }
+
+        tailPFN = CONTAINING_RECORD(tailLink, PFNdata, links);
+
+        // lock page initially at tail (it may have been pulled off list in meantime)
+        acquireJLock(&(tailPFN->lockBits));
+
+        // lock list - both locks now acquired
+        EnterCriticalSection(&(listHead->lock));
+
+        // verify page remains at tail of list
+        if (tailLink == (listHead->head).Blink) {
+            break;
+        }
+
+        // if not, release the locks and try again
+
+        // release held locks (in diverging order in terms of "hotness")
+        LeaveCriticalSection(&(listHead->lock));
+
+        releaseJLock(&(tailPFN->lockBits));
+
+    }
+
+    PPFNdata returnPFN;
+    returnPFN = dequeuePageFromTail(listHead);
+
+    ASSERT(returnPFN == tailPFN);
+
+    LeaveCriticalSection(&(listHead->lock));
+
+    // check "returnLocked" boolean flag
+    if (returnLocked == TRUE) {
+        return returnPFN;
+    }
+
+    releaseJLock(&(tailPFN->lockBits));
+
+    return returnPFN;
+
 }
 
 

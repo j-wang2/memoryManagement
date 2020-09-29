@@ -54,6 +54,7 @@ dequeuePage(PlistData listHead);
  *  - no locks should be held upon call
  *  - acquires page lock, then list lock
  *  - BOOLEAN returnLocked flag can be set to true to not release page lock
+ *  - calls dequeuePage
  * 
  * Returns PPFNdata
  *  - PPFNdata returnPFN on success (can be either unlocked or locked depending on returnLocked param)
@@ -75,6 +76,22 @@ dequeueLockedPage(PlistData listHead, BOOLEAN returnLocked);
  */
 PPFNdata
 dequeuePageFromTail(PlistData listHead);
+
+
+/*
+ * dequeueLockedPageFromTail: SYNCHRONIZED function to dequeue an item from tail (adapted for multithreading)
+ *  - "peeks" at tail page, locks it, and then verifies it has not since changed
+ *  - no locks should be held upon call
+ *  - acquires page lock, then list lock
+ *  - BOOLEAN returnLocked flag can be set to true/false to release/not release page lock
+ *  - calls dequeuePageFromTail
+ * 
+ * Returns PPFNdata
+ *  - PPFNdata returnPFN on success (can be either unlocked or locked depending on returnLocked param)
+ *  - NULL on empty list
+ */
+PPFNdata
+dequeueLockedPageFromTail(PlistData listHead, BOOLEAN returnLocked);
 
 
 /*

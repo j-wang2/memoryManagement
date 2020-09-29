@@ -195,7 +195,7 @@ tradeVA(PVOID virtualAddress)
             return FALSE;
         }
 
-        pageFault(virtualAddress, READ_ONLY);
+        pageFault(virtualAddress, READ_ONLY);           // todo - check ret value
 
         if (originalValidBit) {
 

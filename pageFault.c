@@ -190,6 +190,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // dequeue a page of memory from freed list
     PPFNdata freedPFN;
     freedPFN = getPage();
+
     if (freedPFN == NULL) {
         PRINT_ERROR("[pageFilePageFault] failed to successfully acquire PFN in getPage\n");
         return NO_FREE_PAGES;
@@ -201,12 +202,14 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // get page number of the new page we/re allocating
     pageNum = freedPFN - PFNarray;
 
+
     PVANode readPFVANode;
     readPFVANode = dequeueVA(&readPFVAListHead);
 
     if (readPFVANode == NULL) {
         PRINT("[pageFilePageFault] TODO: waiting for release\n");
     }
+
 
     PVOID readPFVA;
     readPFVA = readPFVANode->VA;    
@@ -218,21 +221,26 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         return FALSE;
     }
 
+
     // get PFsourceVA from the pageFileIndex
     PVOID PFsourceVA;
     PFsourceVA = (PVOID) ( (ULONG_PTR) pageFileVABlock + (snapPTE.u1.pfPTE.pageFileIndex << PAGE_SHIFT) );
+
     
     // copy contents from pagefile to our new page
     memcpy(readPFVA, PFsourceVA, PAGE_SIZE);
 
+
     // unmap VA from page - PFN is now filled w contents from pagefile
     if (!MapUserPhysicalPages(readPFVA, 1, NULL)) {
-        PRINT_ERROR("error copyipng page from into page\n");
+        PRINT_ERROR("error copying page from into page\n");
         return FALSE;
     }
+
     
     ULONG_PTR PTEindex;
     PTEindex = masterPTE - PTEarray;
+
 
     // set PFN PTE index
     freedPFN->PTEindex = PTEindex;
@@ -410,46 +418,55 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     
     // make a shallow copy/"snapshot" of the PTE to edit and check
     PTE oldPTE;
-    oldPTE = *currPTE;
 
     faultStatus status;
-    if (oldPTE.u1.hPTE.validBit == 1) {                                 // VALID STATE PTE
 
-        status = validPageFault(RWEpermissions, oldPTE, currPTE);
-        return status;
+    while (TRUE) {
+        oldPTE = *currPTE;
 
-    } 
-    else if (oldPTE.u1.tPTE.transitionBit == 1) {                       // TRANSITION STATE PTE
+        if (oldPTE.u1.hPTE.validBit == 1) {                                 // VALID STATE PTE
 
-        status = transPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
-        return status;
+            status = validPageFault(RWEpermissions, oldPTE, currPTE);
+            return status;
+
+        } 
+        else if (oldPTE.u1.tPTE.transitionBit == 1) {                       // TRANSITION STATE PTE
+
+            status = transPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
+            if (status == PAGE_STATE_CHANGE){
+                continue;
+            }
+            return status;
+
+        }
+        else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS && oldPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {          // PAGEFILE STATE PTE
+
+            status = pageFilePageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);  
+            return status;
+
+        }
+        else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS) {                        // DEMAND ZERO STATE PTE  
+
+            status = demandZeroPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
+            return status;
+
+        }
+        else if (oldPTE.u1.ulongPTE == 0) {                                 // ZERO STATE PTE
+
+            // TODO (future): may need to check if vad is mem commit and bring in permissions
+            // status = checkVADPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
+
+            PRINT("access violation - PTE is zero\n");
+            return ACCESS_VIOLATION;
+
+        }
+
+        else {
+            PRINT_ERROR("ERROR - not in any recognized PTE state\n");
+            exit (-1);
+        }
 
     }
-    else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS && oldPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {          // PAGEFILE STATE PTE
 
-        status = pageFilePageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);  
-        return status;
-
-    }
-    else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS) {                        // DEMAND ZERO STATE PTE  
-
-        status = demandZeroPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
-        return status;
-
-    }
-    else if (oldPTE.u1.ulongPTE == 0) {                                 // ZERO STATE PTE
-
-        // TODO (future): may need to check if vad is mem commit and bring in permissions
-        // status = checkVADPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
-
-        PRINT("access violation - PTE is zero\n");
-        return ACCESS_VIOLATION;
-
-    }
-
-    else {
-        PRINT_ERROR("ERROR - not in any recognized PTE state\n");
-        exit (-1);
-    }
     
 }

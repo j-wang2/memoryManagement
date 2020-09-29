@@ -35,7 +35,6 @@ getFreePage()
 
         if (returnPFN == NULL) {
             PRINT("[getPage] free list empty\n");
-
             return NULL;
         }
 
@@ -56,11 +55,10 @@ getStandbyPage()
     if (standbyListHead.count != 0) {
 
         // dequeue a page from standby list
-        returnPFN = dequeuePageFromTail(&standbyListHead);
+        returnPFN = dequeueLockedPageFromTail(&standbyListHead, FALSE);
 
         if (returnPFN == NULL) {
             PRINT("[getPage] standby list empty\n");
-
             return NULL;
         }
 
