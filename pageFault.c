@@ -201,22 +201,33 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // get page number of the new page we/re allocating
     pageNum = freedPFN - PFNarray;
 
+    PVANode readPFVANode;
+    readPFVANode = dequeueVA(&readPFVAListHead);
+
+    if (readPFVANode == NULL) {
+        PRINT("[pageFilePageFault] TODO: waiting for release\n");
+    }
+
+    PVOID readPFVA;
+    readPFVA = readPFVANode->VA;    
+
+
     // map given page to the "zero" VA
-    if (!MapUserPhysicalPages(pageFileFormatVA, 1, &pageNum)) {
-        PRINT_ERROR("error remapping pageFileFormatVA\n");
+    if (!MapUserPhysicalPages(readPFVA, 1, &pageNum)) {
+        PRINT_ERROR("[pageFilePageFault]error remapping page to copy from PF\n");
         return FALSE;
     }
 
     // get PFsourceVA from the pageFileIndex
     PVOID PFsourceVA;
-    PFsourceVA = (PVOID) ( (ULONG_PTR) pageFileVABlock + (PAGE_SIZE * snapPTE.u1.pfPTE.pageFileIndex) );
+    PFsourceVA = (PVOID) ( (ULONG_PTR) pageFileVABlock + (snapPTE.u1.pfPTE.pageFileIndex << PAGE_SHIFT) );
     
-    // copy contents from pagefile to our new page (via pageFileFormatVA)
-    memcpy(pageFileFormatVA, PFsourceVA, PAGE_SIZE);
+    // copy contents from pagefile to our new page
+    memcpy(readPFVA, PFsourceVA, PAGE_SIZE);
 
-    // unmap pageFileFormatVA from page - PFN is now filled w contents from pagefile
-    if (!MapUserPhysicalPages(pageFileFormatVA, 1, NULL)) {
-        PRINT_ERROR("error copying into page\n");
+    // unmap VA from page - PFN is now filled w contents from pagefile
+    if (!MapUserPhysicalPages(readPFVA, 1, NULL)) {
+        PRINT_ERROR("error copyipng page from into page\n");
         return FALSE;
     }
     

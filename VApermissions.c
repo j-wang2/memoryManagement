@@ -174,7 +174,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
             totalCommittedPages++;
 
             PVOID currVA;
-            currVA = (PVOID) ( (ULONG_PTR) startVA + PAGE_SIZE* (currPTE - startPTE) );
+            currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
             PRINT("[commitVA] Committed PTE at VA %llx with permissions %d\n", (ULONG_PTR) currVA, RWEpermissions);
 
         
@@ -248,7 +248,8 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
 
 
         PVOID currVA;
-        currVA = (PVOID) ( (ULONG_PTR) startVA + PAGE_SIZE* (currPTE - startPTE) );
+        currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
+
         PRINT("[protectVA] Updated permissions for PTE at VA %llx with permissions %d\n", (ULONG_PTR) currVA, newRWEpermissions);
 
         * (volatile PTE *) currPTE = tempPTE;
@@ -297,7 +298,8 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
         }
 
         // PVOID currVA;
-        // currVA = (PVOID) ( (ULONG_PTR) startVA + PAGE_SIZE* (currPTE - startPTE) );
+        // currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
+
         // PRINT("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
         // PRINT("decommiting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) currVA, * (PCHAR *) currVA);
 

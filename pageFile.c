@@ -94,7 +94,7 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
 
     // get location in pagefile from bitindex
     void* PFLocation;
-    PFLocation = (void*) ( (ULONG_PTR)pageFileVABlock + bitIndex*PAGE_SIZE);
+    PFLocation = (void*) ( (ULONG_PTR)pageFileVABlock + ( bitIndex << PAGE_SHIFT ) );        // equiv to bitIndex*page_size
 
     // copy the contents in the currentPFN out to the pagefile
     memcpy(PFLocation, modifiedWriteVA, PAGE_SIZE);

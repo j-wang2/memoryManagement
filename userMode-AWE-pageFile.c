@@ -15,33 +15,37 @@
 #include "jLock.h"
 
 
-/******* GLOBALS *****/
-void* leafVABlock;                  // starting address of memory block
-void* leafVABlockEnd;               // ending address of memory block
+/******************************************************
+ *********************** GLOBALS **********************
+ *****************************************************/
+void* leafVABlock;                  // starting address of virtual memory block
+void* leafVABlockEnd;               // ending address of virtual memory block
 
 PPFNdata PFNarray;                  // starting address of PFN metadata array
 PPTE PTEarray;                      // starting address of page table
-
 
 void* pageTradeDestVA;                  // specific VA used for page trading destination
 void* pageTradeSourceVA;                // specific VA used for page trading source
 
 ULONG_PTR totalCommittedPages;      // count of committed pages (initialized to zero)
-ULONG_PTR totalMemoryPageLimit = NUM_PAGES + PAGEFILE_SIZE / PAGE_SIZE;    // limit of committed pages (memory block + pagefile space)
+ULONG_PTR totalMemoryPageLimit = NUM_PAGES + (PAGEFILE_SIZE >> PAGE_SHIFT);    // limit of committed pages (memory block + pagefile space)
 
 void* pageFileVABlock;              // starting address of pagefile "disk" (memory)
-void* pageFileFormatVA;             // specific VA used for copying in page contents from pagefile
 ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 
 // Execute-Write-Read (bit ordering)
 ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask | executeMask), (readMask | writeMask | executeMask) };
 
-listData listHeads[ACTIVE];         // intialization of listHeads array
+/************ List declarations *****************/
+listData listHeads[ACTIVE];         // page listHeads array
 
-listData zeroVAListHead;            // list of zeroVAs used for zeroing PFNs (via AWE mapping)
-listData writeVAListHead;           // list of writeVAs used for writing to page file
+listData zeroVAListHead;            // listHead of zeroVAs used for zeroing PFNs (via AWE mapping)
+listData writeVAListHead;           // listHead of writeVAs used for writing to page file
+listData readPFVAListHead;
+
 
 listData VADListHead;               // list of VADs
+
 
 BOOLEAN debugMode;
 
@@ -274,7 +278,7 @@ initVABlock(ULONG_PTR numPages, ULONG_PTR pageSize)
     }
 
     // TODO - do i need to avoid overflow? Which of these should it be
-    leafVABlockEnd = (PVOID) ( (ULONG_PTR)leafVABlock + numPages*PAGE_SIZE );
+    leafVABlockEnd = (PVOID) ( (ULONG_PTR)leafVABlock + ( numPages << PAGE_SHIFT ) );   // equiv to numPages*PAGE_SIZE
 
 
 }
@@ -765,7 +769,7 @@ initVAList(PlistData VAListHead, ULONG_PTR numVAs)
 
     // alloc for VAs
     void* baseVA;
-    baseVA = VirtualAlloc(NULL, numVAs * PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+    baseVA = VirtualAlloc(NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);      // equiv to numVAs*PAGE_SIZE
 
     // alloc for nodes
     PVANode baseNode;
@@ -782,7 +786,7 @@ initVAList(PlistData VAListHead, ULONG_PTR numVAs)
         currNode = baseNode + i;
 
         // get address of current address
-        currVA = (void*) ( (ULONG_PTR)baseVA + i*PAGE_SIZE );
+        currVA = (void*) ( (ULONG_PTR)baseVA + ( i << PAGE_SHIFT ) );   // equiv to i*PAGE_SIZE
 
         currNode->VA = currVA;
 
@@ -1028,13 +1032,12 @@ main(int argc, char** argv)
 
     initVAList(&writeVAListHead, NUM_ZERO_THREADS + 3);
 
+    initVAList(&readPFVAListHead, NUM_ZERO_THREADS + 3);
+
 
     // reserve AWE addresses for page trading
     pageTradeDestVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
     pageTradeSourceVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
-
-    // reserve AWE address for pageFileFormatVA
-    pageFileFormatVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
 
     // memset the pageFile bit array
     memset(&pageFileBitArray, 0, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );

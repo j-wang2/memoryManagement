@@ -175,7 +175,6 @@ extern ULONG_PTR totalMemoryPageLimit;     // limit of committed pages (memory b
 
 
 extern void* pageFileVABlock;              // starting address of pagefile "disk" (memory)
-extern void* pageFileFormatVA;             // specific VA used for copying in page contents from pagefile
 extern ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 
 // Execute-Write-Read (bit ordering)
@@ -195,7 +194,7 @@ extern listData listHeads[ACTIVE];
 
 extern listData zeroVAListHead;             // list of zeroVAs used for zeroing PFNs (via AWE mapping)
 extern listData writeVAListHead;            // list of writeVAs used for writing to page file
-
+extern listData readPFVAListHead;
 
 extern listData VADListHead;               // list of VADs
 
