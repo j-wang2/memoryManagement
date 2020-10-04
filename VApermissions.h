@@ -66,6 +66,18 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
 
 
 /*
+ * trimVA(void* VA): function to trim the entire containing page corresponding to VA param
+ *  - Converts from VALID format PTE to TRANSITION format PTE
+ * 
+ * Returns BOOLEAN:
+ *  - TRUE on success
+ *  - FALSE on failure (i.e. PTE valid bit not set)
+ */
+BOOLEAN
+trimVA(void* virtualAddress);
+
+
+/*
  * decommitVA: function to decommit a given virtual address
  * 
  * Returns BOOLEAN

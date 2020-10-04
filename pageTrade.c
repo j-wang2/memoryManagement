@@ -3,6 +3,7 @@
 #include "getPage.h"
 #include "pageFault.h"
 #include "jLock.h"
+#include "VApermissions.h"
 
 BOOLEAN
 tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)
@@ -12,26 +13,37 @@ tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)
     PPFNdata pageToTrade;
     pageToTrade = PFNarray + PFNtoTrade;
 
-    acquireJLock(&(pageToTrade->lockBits));
+    acquireJLock(&pageToTrade->lockBits);
 
     if (pageToTrade->statusBits != FREE && pageToTrade->statusBits != ZERO) {
 
         releaseJLock(&(pageToTrade->lockBits));
-        PRINT ("[tradeFreeOrZeroPage] Page is no longer on free or zero list\n");
+        PRINT ("[tradeFreeOrZeroPage] Page is no longer free or zero \n");
         return FALSE;
 
     }
-    // dequeue from current list
-    dequeueSpecificPage(pageToTrade);
 
-    // sets status bits also
-    enqueuePage(&quarantineListHead, pageToTrade);
+
+    if (pageToTrade->writeInProgressBit == 1) {
+
+        // signal to zeroPageWriter to enqueue to quarantine when done
+        pageToTrade->statusBits = AWAITING_QUARANTINE;
+
+    } else {
+
+        // dequeue from current list
+        dequeueSpecificPage(pageToTrade);
+
+        // sets status bits also
+        enqueuePage(&quarantineListHead, pageToTrade);
+
+    }
 
     // release lock
     releaseJLock(&(pageToTrade->lockBits));
 
     // increment commit count, since this page is now out of circulation
-    totalCommittedPages++;  // TODO- CHECK COMMIT COUNT
+    totalCommittedPages++;
 
     return TRUE;
 
@@ -173,10 +185,10 @@ tradeVA(PVOID virtualAddress)
     if (snapPTE.u1.hPTE.validBit == 1){
 
         BOOLEAN tResult;
-        tResult = trimPage(virtualAddress);         // TODO: possible multithreading issues
+        tResult = trimVA(virtualAddress);         // TODO: possible multithreading issues
 
         if (tResult == FALSE) {
-            PRINT_ERROR("[pageTrade] unable to trimPage at VA %llu\n", (ULONG_PTR) virtualAddress);
+            PRINT_ERROR("[pageTrade] unable to trimVA at VA %llu\n", (ULONG_PTR) virtualAddress);
             return FALSE;
         }
 

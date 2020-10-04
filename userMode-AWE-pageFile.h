@@ -16,6 +16,7 @@
 #define NUM_ZERO_THREADS 3
 #define TESTING_ZERO
 #define TESTING_MODIFIED
+#define TESTING_VERIFY_ADDRESSES
 
 
 /*********** number of physical memory pages to allocate (+ PF pages for total memory) **********/
@@ -51,7 +52,7 @@
 
 /***************** print macros ******************/
 #define PRINT(fmt, ...) if (debugMode == TRUE) { printf(fmt, __VA_ARGS__); }                // verify this works
-#define PRINT_ERROR(fmt, ...) if (debugMode == TRUE) { fprintf(stderr, fmt, __VA_ARGS__); ASSERT(FALSE); }
+#define PRINT_ERROR(fmt, ...) if (debugMode == TRUE) { fprintf(stderr, fmt, __VA_ARGS__); } ASSERT(FALSE); 
 #define PRINT_ALWAYS(fmt, ...) printf(fmt, __VA_ARGS__)
 
 
@@ -103,7 +104,7 @@ typedef struct _PFNdata {
     ULONG64 statusBits: 5;
     ULONG64 pageFileOffset: PAGEFILE_BITS;
     ULONG64 PTEindex: PTE_INDEX_BITS;
-    ULONG64 writeInProgressBit: 1;
+    ULONG64 writeInProgressBit: 1;          // also used to signify to page trader that page could be being zeroed
     ULONG64 refCount: 16;
     ULONG64 remodifiedBit: 1;        
     volatile LONG lockBits;                // 31 free bits if necessary
@@ -133,7 +134,8 @@ typedef enum {          // DO NOT EDIT ORDER without checking enqueue/dequeue
     QUARANTINE,         // 4
     NONE,               // 5 (transitioning between states)
     AWAITING_FREE,      // 6
-    ACTIVE,             // 7 (ACTIVE must be last since it is used to dimensionalize arrays)
+    AWAITING_QUARANTINE,// 7
+    ACTIVE,             // 8 (ACTIVE must be last since it is used to dimensionalize arrays)
 } PFNstatus;
 
 typedef enum {
@@ -214,16 +216,7 @@ PPTE
 getPTE(void* virtualAddress);
 
 
-/*
- * trimPage(void* VA): function to trim the entire containing page corresponding to VA param
- *  - Converts from VALID format PTE to TRANSITION format PTE
- * 
- * Returns BOOLEAN:
- *  - TRUE on success
- *  - FALSE on failure (i.e. PTE valid bit not set)
- */
-BOOLEAN
-trimPage(void* virtualAddress);
+
 
 
 /*****************************************************************
@@ -296,7 +289,7 @@ DWORD WINAPI
 zeroPageThread();
 
 /*
- * TODO (future): bump refcount and set write in progress bit in PFN
+ * TODO (future, shared implementation): bump refcount
  *  - must prevent from being accessed via PTE while being written out
  *  - write in progress
  * 

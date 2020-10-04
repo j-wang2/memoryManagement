@@ -21,7 +21,9 @@ getZeroPage()
         return returnPFN;        
 
     } else {
+
         return NULL;
+
     }
 }
 
@@ -29,8 +31,11 @@ getZeroPage()
 PPFNdata 
 getFreePage()
 {
+
     PPFNdata returnPFN;
+
     if (freeListHead.count != 0) {
+
         returnPFN = dequeueLockedPage(&freeListHead, FALSE);
 
         if (returnPFN == NULL) {
@@ -41,7 +46,9 @@ getFreePage()
         return returnPFN;
 
     } else {
+
         return NULL;
+        
     }
 }
 

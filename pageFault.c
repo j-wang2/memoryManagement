@@ -23,7 +23,7 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
     } 
     
     // check for Write permissions - if write, set dirty bit and clear PF
-    else if (permissionMasks[RWEpermissions] & writeMask) {
+    if (permissionMasks[RWEpermissions] & writeMask) {
 
         // set PTE to dirty
         snapPTE.u1.hPTE.dirtyBit = 1;
@@ -32,16 +32,26 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
         PPFNdata PFN;
         PFN = PFNarray + snapPTE.u1.hPTE.PFN;
 
-        // free PF location
-        clearPFBitIndex(PFN->pageFileOffset);
+        // if the write in progress bit is clear, immediately free pf location 
+        // and pf PFN pointer
+        // if the write in progress bit is set, the bit index and pagefile field
+        // are cleared by the smodified page writer once it finishes writing
+        if (PFN->writeInProgressBit == 0) {
 
-        // clear pagefile pointer out of PFN
-        PFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+            // free PF location
+            clearPFBitIndex(PFN->pageFileOffset);
+
+            // clear pagefile pointer out of PFN
+            PFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+
+        }
 
         * (volatile PTE *) masterPTE = snapPTE;
 
     }
-PRINT("PFN is already valid\n");
+
+    PRINT("PFN is already valid\n");
+
     return SUCCESS;
 
 }
@@ -54,9 +64,8 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
     PRINT(" - trans page fault\n");
 
-    // declare pageNum (PFN) ULONG
-    ULONG_PTR pageNum;
 
+    // initialize new PTE to be written
     PTE newPTE;
     newPTE.u1.ulongPTE = 0;
 
@@ -70,50 +79,64 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
     }
 
-    // get page number with transition PTE
+
+    // declare pageNum (PFN) ULONG and get page number from transition PTE
+    ULONG_PTR pageNum;
     pageNum = snapPTE.u1.tPTE.PFN;
 
+
+    // get PFN data from that pagenum
     PPFNdata transitionPFN;
     transitionPFN = PFNarray + pageNum;
 
-    acquireJLock(&transitionPFN->lockBits);
 
     if (transitionPFN->statusBits != STANDBY && transitionPFN->statusBits != MODIFIED) {
         
-        releaseJLock(&(transitionPFN->lockBits));
         PRINT("[transPageFault] - page has changed state. Retrying\n");
-        return PAGE_STATE_CHANGE;           // TODO - make sure caller handles this.
+        return PAGE_STATE_CHANGE;
 
     }
 
+
     // if attempting to write, set dirty bit & clear PF location if it exists
     if (permissionMasks[RWEpermissions] & writeMask) { 
+
 
         // set PTE to dirty
         newPTE.u1.hPTE.dirtyBit = 1;
 
 
-        // free PF location if not currently being written out
+        // if the write in progress bit is clear, immediately free pf location 
+        // and pf PFN pointer
+        // if the write in progress bit is set, the bit index and pagefile field
+        // are cleared by the smodified page writer once it finishes writing
         if (transitionPFN->writeInProgressBit == 0) {
-            // todo - window where write in progress could be set (needs to be locked)
-           clearPFBitIndex(transitionPFN->pageFileOffset);
+
+            // clear PF bit index
+            clearPFBitIndex(transitionPFN->pageFileOffset);
+
+
+            // clear pagefile pointer out of PFN
+            transitionPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+
         }
 
-        // clear pagefile pointer out of PFN
-        transitionPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
     } else {
         
         // if PFN is modified, maintain dirty bit when switched back
         if (transitionPFN->statusBits == MODIFIED) {
+
             newPTE.u1.hPTE.dirtyBit = 1;
+
         }
         
     }
 
 
-    // copy permissions from transition PTE into our soon-to-be-active PTE
+    // copy permissions into our soon-to-be-active PTE from transition PTE
     transferPTEpermissions(&newPTE, transRWEpermissions);
+
 
     // only dequeue if write in progress bit is zero
     if (transitionPFN->writeInProgressBit == 0) {
@@ -124,7 +147,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     }
 
 
-    // & set status to active
+    // & set page status to active
     transitionPFN->statusBits = ACTIVE;
 
     ULONG_PTR PTEindex;
@@ -148,13 +171,21 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
     // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a brief lack of permissions protection
 
+
+    // TODO - check return values & allow multiple mappings to the same page
     // assign VA to point at physical page, mirroring our local PTE change
-    MapUserPhysicalPages(virtualAddress, 1, &pageNum);
+    BOOL bResult;
+    bResult = MapUserPhysicalPages(virtualAddress, 1, &pageNum);
+
+    if (bResult != TRUE) {
+
+        PRINT("[pageFault] two mappings at one page, not an error\n");
+        ASSERT(FALSE);
+        
+    }
 
     // update physical permissions of hardware PTE to match our software reference.
     VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[transRWEpermissions], &oldPermissions);
-
-    releaseJLock(&transitionPFN->lockBits);
 
     return SUCCESS;
 
@@ -204,10 +235,13 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
 
     PVANode readPFVANode;
-    readPFVANode = dequeueVA(&readPFVAListHead);
+    readPFVANode = dequeueVA(&readPFVAListHead);    // TODO: locking
 
     if (readPFVANode == NULL) {
+
         PRINT("[pageFilePageFault] TODO: waiting for release\n");
+        DebugBreak();
+
     }
 
 
@@ -217,10 +251,13 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     // map given page to the "zero" VA
     if (!MapUserPhysicalPages(readPFVA, 1, &pageNum)) {
+
         PRINT_ERROR("[pageFilePageFault]error remapping page to copy from PF\n");
         return FALSE;
+
     }
 
+    // TODO: function into file systemva
 
     // get PFsourceVA from the pageFileIndex
     PVOID PFsourceVA;
@@ -248,12 +285,17 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // set hardware PTE to valid
     newPTE.u1.hPTE.validBit = 1;
 
-    if (permissionMasks[RWEpermissions] & writeMask) { // if attempting to write, set dirty bit & clear PF location if it exists
+
+    // if attempting to write, set dirty bit & clear PF location if it exists
+    if (permissionMasks[RWEpermissions] & writeMask) {
 
         // set PTE to dirty
         newPTE.u1.hPTE.dirtyBit = 1;
 
-        // free PF location
+        // free PF location 
+        // TODO: if two threads clear near-simultaneously, the PFbit index could be 
+        // used for another unrelated purpose and then the second thread would clear
+        // data that is unrelated and unexpected
         clearPFBitIndex(snapPTE.u1.pfPTE.pageFileIndex);
 
         // clear pagefile pointer out of PFN
@@ -269,6 +311,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     newPTE.u1.hPTE.PFN = pageNum;
     
     // compiler writes out as indivisible store
+    // TODO - multithreading issue
     * (volatile PTE *) masterPTE = newPTE;
 
     DWORD oldPermissions;
@@ -276,6 +319,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a lack of permissions protection
 
     // assign VA to point at physical page, mirroring our local PTE change
+    // TODO - multithreading issue
     MapUserPhysicalPages(virtualAddress, 1, &pageNum);
 
     // update physical permissions of hardware PTE to match our software reference.
@@ -424,28 +468,69 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     while (TRUE) {
         oldPTE = *currPTE;
 
+        PPFNdata currPFN;
+
         if (oldPTE.u1.hPTE.validBit == 1) {                                 // VALID STATE PTE
 
+            currPFN = PFNarray + oldPTE.u1.hPTE.PFN;
+
+            acquireJLock(&currPFN->lockBits);
+
+            // if another thread has since changed the PTE
+            if (oldPTE.u1.ulongPTE != currPTE->u1.ulongPTE){
+
+                releaseJLock(&currPFN->lockBits);
+                continue;
+
+            }
+
             status = validPageFault(RWEpermissions, oldPTE, currPTE);
+
+            releaseJLock(&currPFN->lockBits);
+
             return status;
 
         } 
         else if (oldPTE.u1.tPTE.transitionBit == 1) {                       // TRANSITION STATE PTE
 
-            status = transPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
-            if (status == PAGE_STATE_CHANGE){
+            currPFN = PFNarray + oldPTE.u1.tPTE.PFN;
+
+            acquireJLock(&currPFN->lockBits);
+
+            // if another thread has since changed the PTE
+            if (oldPTE.u1.ulongPTE != currPTE->u1.ulongPTE){
+
+                releaseJLock(&currPFN->lockBits);
                 continue;
+
+            }            
+
+            status = transPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
+
+            releaseJLock(&currPFN->lockBits);
+
+
+            // if page has since changed status, resnap PTE and check again
+            if (status == PAGE_STATE_CHANGE){
+
+                continue;
+
             }
+
             return status;
 
         }
         else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS && oldPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {          // PAGEFILE STATE PTE
+
+            // TODO - still needs to be locked (to prevent other threads faulting OR decommitting)
 
             status = pageFilePageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);  
             return status;
 
         }
         else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS) {                        // DEMAND ZERO STATE PTE  
+
+            // TODO - still needs to be locked (to prevent other threads faulting OR decommitting)
 
             status = demandZeroPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
             return status;

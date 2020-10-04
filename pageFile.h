@@ -18,6 +18,7 @@ setPFBitIndex();
 /* 
  * clearPFBitIndex: function to clear (change from 1 to 0) bit index of pageFile bit array
  *  - denotes that PF offset is clear and can be used
+ *  - if called with INVALID_PAGEFILE_INDEX, simply returns
  * 
  * No return value 
  */

@@ -25,6 +25,7 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
         snapPTE = *currPTE;
 
         if (snapPTE.u1.hPTE.validBit == 1) {
+
             ULONG_PTR currPFNindex;
 
             currPFNindex = snapPTE.u1.hPTE.PFN;
@@ -193,6 +194,109 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
 
 BOOLEAN
+trimVA(void* virtualAddress)
+{
+    PRINT("[trimVA] trimming page with VA %llu\n", (ULONG_PTR) virtualAddress);
+
+    PPTE PTEaddress;
+    PTEaddress = getPTE(virtualAddress);
+
+    if (PTEaddress == NULL) {
+        PRINT_ERROR("could not trim VA %llu - no PTE associated with address\n", (ULONG_PTR) virtualAddress);
+        return FALSE;
+    }
+    
+    // take snapshot of old PTE
+    PTE oldPTE;
+    oldPTE = *PTEaddress;
+
+    // check if PTE's valid bit is set - if not, can't be trimmed and return failure
+    if (oldPTE.u1.hPTE.validBit == 0) {
+        PRINT("could not trim VA %llu - PTE is not valid\n", (ULONG_PTR) virtualAddress);
+        return FALSE;
+    }
+
+    // get pageNum
+    ULONG_PTR pageNum;
+    pageNum = oldPTE.u1.hPTE.PFN;
+
+    // get PFN
+    PPFNdata PFNtoTrim;
+    PFNtoTrim = PFNarray + pageNum;
+
+    // acquire lock
+    acquireJLock(&PFNtoTrim->lockBits);
+
+
+    // if PTE has changed, return false
+    if (oldPTE.u1.ulongPTE != PTEaddress->u1.ulongPTE) {
+        releaseJLock(&PFNtoTrim->lockBits);
+        PRINT("[trimVA] PTE has been changed\n");
+        return FALSE;
+    }
+
+
+    ASSERT(PFNtoTrim->statusBits == ACTIVE);
+
+
+    // zero new PTE
+    PTE PTEtoTrim;
+    PTEtoTrim.u1.ulongPTE = 0;
+
+
+    // unmap page from VA (invalidates hardwarePTE)
+    MapUserPhysicalPages(virtualAddress, 1, NULL);
+
+    // if write in progress bit is set, modified writer re-enqueues page
+    if (PFNtoTrim->writeInProgressBit == 1) {
+
+        if (oldPTE.u1.hPTE.dirtyBit == 0) {
+            PFNtoTrim->statusBits = STANDBY;
+        }
+
+        else if (oldPTE.u1.hPTE.dirtyBit == 1) {
+            
+            // to notify modified writer that page has since been re-modified
+            PFNtoTrim->remodifiedBit = 1;
+
+            PFNtoTrim->statusBits = MODIFIED;
+
+        }
+
+    }
+    else {
+        // check dirtyBit to see if page has been modified
+        if (oldPTE.u1.hPTE.dirtyBit == 0) {
+
+            // add given VA's page to standby list
+            enqueuePage(&standbyListHead, PFNtoTrim);
+
+        } 
+        else if (oldPTE.u1.hPTE.dirtyBit == 1) {
+
+            // add given VA's page to modified list;
+            enqueuePage(&modifiedListHead, PFNtoTrim);
+
+        }
+    }
+
+
+    // set transitionBit to 1
+    PTEtoTrim.u1.tPTE.transitionBit = 1;  
+    PTEtoTrim.u1.tPTE.PFN = pageNum;
+
+    PTEtoTrim.u1.tPTE.permissions = getPTEpermissions(oldPTE);
+
+    * (volatile PTE *) PTEaddress = PTEtoTrim;
+
+    releaseJLock(&PFNtoTrim->lockBits);
+
+    return TRUE;
+
+}
+
+
+BOOLEAN
 protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize) {
 
     PPTE startPTE;
@@ -276,9 +380,8 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
     endPTE = getPTE(endVA);
     
     PPTE currPTE;
+    PVOID currVA;
 
-    // temp fix - TODO. Limits to a single decommit at a given time.
-    endPTE = startPTE;
 
     for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
@@ -291,29 +394,55 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
         PTE tempPTE;
         tempPTE = *currPTE;
 
+        currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
+
         // check if PTE is already zeroed
         if (tempPTE.u1.ulongPTE == 0) {
             PRINT("VA is already decommitted\n");
             continue;
         }
 
-        // PVOID currVA;
-        // currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
-
-        // PRINT("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
-        // PRINT("decommiting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) currVA, * (PCHAR *) currVA);
-
-
         // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
 
         else if (tempPTE.u1.hPTE.validBit == 1) {                       // valid/hardware format
+        
+            #ifdef TESTING_VERIFY_ADDRESSES
+            if (!(ULONG_PTR) currVA == * (ULONG_PTR*) currVA) {
+                PRINT_ERROR("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+                
+            }
+            #endif
+
+            PRINT_ALWAYS("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+            // PRINT("decommiting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) currVA, * (PCHAR *) currVA);
+
 
             // get PFN
             PPFNdata currPFN;
             currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
 
+            // acquire lock and check if PTE has changed
+            acquireJLock(&currPFN->lockBits);
+
+            if (tempPTE.u1.ulongPTE != currPTE->u1.ulongPTE) {
+
+                // if PTE has changed, release lock, set currPTE back one, and continue (so that it rereads)
+                releaseJLock(&currPFN->lockBits);
+                currPTE--;
+                PRINT("[decommitVA] PTE has since been changed from active state\n");
+
+                continue;
+
+            }
+
             // unmap VA from page
-            MapUserPhysicalPages(startVA, 1, NULL);
+            BOOL bResult;
+            bResult = MapUserPhysicalPages(startVA, 1, NULL);
+
+            if (bResult != TRUE) {
+                PRINT_ERROR("[decommitVA] unable to decommit VA %llx\n", (ULONG_PTR) currVA);
+            }
+
 
             if (currPFN->writeInProgressBit == 1) {
 
@@ -327,8 +456,10 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
                 }
 
                 // enqueue Page to free list
-                enqueuePage(&freeListHead, currPFN);        // TODO 
+                enqueuePage(&freeListHead, currPFN);
             }
+
+            releaseJLock(&currPFN->lockBits);
 
 
 
@@ -343,11 +474,12 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
             acquireJLock(&currPFN->lockBits);
 
             // verify is still transition and pointed to by PTE index
-            if ( (currPFN->statusBits != STANDBY && currPFN->statusBits != MODIFIED)
+            if ( tempPTE.u1.ulongPTE != currPTE->u1.ulongPTE
+            || (currPFN->statusBits != STANDBY && currPFN->statusBits != MODIFIED)
             || currPFN->PTEindex != (ULONG64) (currPTE - PTEarray) ) {
                 
                 releaseJLock(&currPFN->lockBits);
-                PRINT("[decommitVA] currPFN has changed\n");
+                PRINT("[decommitVA] currPFN has changed from transition state\n");
 
                 // reprocess same PTE since it has since been changed
                 currPTE--;
@@ -370,14 +502,11 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
                 if (currPFN->pageFileOffset != INVALID_PAGEFILE_INDEX ) {
                     clearPFBitIndex(currPFN->pageFileOffset);
                 }
+
+                // enqueue Page to free list (setting status bits in process)
+                enqueuePage(&freeListHead, currPFN);
             }
            
-            
-
-
-            
-            // enqueue Page to free list (setting status bits in process)
-            enqueuePage(&freeListHead, currPFN);
 
             releaseJLock(&currPFN->lockBits);
 
@@ -393,7 +522,6 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
             tempPTE.u1.ulongPTE = 0;
 
         }
-
         else if (tempPTE.u1.ulongPTE == 0) {                            // zero PTE
             PRINT_ERROR("[decommitVA] already decommitted\n");
             return TRUE;
@@ -411,6 +539,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
         }
 
+        // zero and write PTE out
         memset(&tempPTE, 0, sizeof(PTE));
 
         * (volatile PTE *) currPTE = tempPTE;

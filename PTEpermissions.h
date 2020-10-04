@@ -5,10 +5,10 @@
 
 
 /*
- * getPTEpermissions: function to convert input PTE's permissions (as separate bits) into a return PTEpermissions (3 consecutive bits)
+ * getPTEpermissions: function to convert input VALID PTE's permissions (as separate bits) into a return PTEpermissions (3 consecutive bits)
  * 
  * Returns PTEpermissions
- *  - PTEpermissions enum on success
+ *  - PTEpermissions enum on success (must be a valid PTE input)
  *  - NO_ACCESS on failure
  */
 PTEpermissions

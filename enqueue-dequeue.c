@@ -14,7 +14,7 @@ checkAvailablePages(PFNstatus dequeuedStatus)
 
     
         if (availablePageCount < 10) {
-            modifiedPageWriter();               // TODO: need to check ret val?
+            modifiedPageWriter();               // : need to check ret val?
             
         }
 
@@ -70,17 +70,9 @@ dequeuePage(PlistData listHead)
     PLIST_ENTRY headLink;
     headLink = &(listHead->head);
 
-    // TODO - any list now requires synchronization
 
-    // TODO - can be assertted rather than checked once all converted to multithreading
-    // verify list has items chained to the head
-    if (headLink->Flink == headLink) {
-
-        ASSERT(listHead->count == 0);
-        return NULL;
-
-    }
-
+    // list must have items chained to the head (since dequeueLockedPage checks)
+    ASSERT(headLink->Flink != headLink);
     ASSERT(listHead->count != 0);
 
     PPFNdata returnPFN;

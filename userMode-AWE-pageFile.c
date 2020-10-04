@@ -77,109 +77,6 @@ getPTE(void* virtualAddress)
 }
 
 
-BOOLEAN
-trimPage(void* virtualAddress)
-{
-    PRINT("[trimPage] trimming page with VA %llu\n", (ULONG_PTR) virtualAddress);
-
-    PPTE PTEaddress;
-    PTEaddress = getPTE(virtualAddress);
-
-    if (PTEaddress == NULL) {
-        PRINT_ERROR("could not trim VA %llu - no PTE associated with address\n", (ULONG_PTR) virtualAddress);
-        return FALSE;
-    }
-    
-    // take snapshot of old PTE
-    PTE oldPTE;
-    oldPTE = *PTEaddress;
-
-    // check if PTE's valid bit is set - if not, can't be trimmed and return failure
-    if (oldPTE.u1.hPTE.validBit == 0) {
-        PRINT("could not trim VA %llu - PTE is not valid\n", (ULONG_PTR) virtualAddress);
-        return FALSE;
-    }
-
-    // get pageNum
-    ULONG_PTR pageNum;
-    pageNum = oldPTE.u1.hPTE.PFN;
-
-    // get PFN
-    PPFNdata PFNtoTrim;
-    PFNtoTrim = PFNarray + pageNum;
-
-    acquireJLock(&PFNtoTrim->lockBits);
-
-    if (oldPTE.u1.ulongPTE != PTEaddress->u1.ulongPTE) {
-        releaseJLock(&PFNtoTrim->lockBits);
-        PRINT("[trimPage] PTE has been changed\n");
-        return FALSE;
-    }
-
-    if (PFNtoTrim->statusBits != ACTIVE) {
-        releaseJLock(&PFNtoTrim->lockBits);
-        PRINT("[trimPage] page has already been trimmed\n");
-        return FALSE;
-    }
-
-
-    // zero new PTE
-    PTE PTEtoTrim;
-    PTEtoTrim.u1.ulongPTE = 0;
-
-
-    // unmap page from VA (invalidates hardwarePTE)
-    MapUserPhysicalPages(virtualAddress, 1, NULL);
-
-    // if write in progress bit is set, modified writer re-enqueues page
-    if (PFNtoTrim->writeInProgressBit == 1) {
-
-        if (oldPTE.u1.hPTE.dirtyBit == 0) {
-            PFNtoTrim->statusBits = STANDBY;
-        }
-
-        else if (oldPTE.u1.hPTE.dirtyBit == 1) {
-            
-            // to notify modified writer that page has since been re-modified
-            PFNtoTrim->remodifiedBit = 1;
-
-            PFNtoTrim->statusBits = MODIFIED;
-
-        }
-
-    }
-    else {
-        // check dirtyBit to see if page has been modified
-        if (oldPTE.u1.hPTE.dirtyBit == 0) {
-
-            // add given VA's page to standby list
-            enqueuePage(&standbyListHead, PFNtoTrim);
-
-        } 
-        else if (oldPTE.u1.hPTE.dirtyBit == 1) {
-
-            // add given VA's page to modified list;
-            enqueuePage(&modifiedListHead, PFNtoTrim);
-
-        }
-    }
-
-
-    // set transitionBit to 1
-    PTEtoTrim.u1.tPTE.transitionBit = 1;  
-    PTEtoTrim.u1.tPTE.PFN = pageNum;
-
-    PTEtoTrim.u1.tPTE.permissions = getPTEpermissions(oldPTE);
-
-    * (volatile PTE *) PTEaddress = PTEtoTrim;
-
-    releaseJLock(&PFNtoTrim->lockBits);
-
-    return TRUE;
-
-}
-
-
 BOOL
 LoggedSetLockPagesPrivilege ( HANDLE hProcess,
                             BOOL bEnable)
@@ -277,7 +174,7 @@ initVABlock(ULONG_PTR numPages, ULONG_PTR pageSize)
         exit(-1);
     }
 
-    // TODO - do i need to avoid overflow? Which of these should it be
+    // Does not need to be checked for overflow since VirtualAlloc will not return a value
     leafVABlockEnd = (PVOID) ( (ULONG_PTR)leafVABlock + ( numPages << PAGE_SHIFT ) );   // equiv to numPages*PAGE_SIZE
 
 
@@ -400,35 +297,55 @@ zeroPage(ULONG_PTR PFN)
 BOOLEAN
 zeroPageWriter()
 {
-    //  PRINT("freeListCount == %llu\n", freeListHead.count);
 
+
+    // acquires & releases both list and page locks
     PPFNdata PFNtoZero;
-
-    // lock whole list (to avoid other threads pulling at same times)
-    PFNtoZero = dequeueLockedPage(&freeListHead, FALSE);
+    PFNtoZero = dequeueLockedPage(&freeListHead, TRUE);
 
 
     if (PFNtoZero == NULL) {
-        // PRINT_ERROR("free list empty - could not write out\n");
+        PRINT("free list empty - could not write out\n");
         return FALSE;
     }
 
-    // get page number, rather than PFN metadata
-    ULONG_PTR pageNumtoZero;
-    pageNumtoZero = PFNtoZero - PFNarray;
-
-    // zeroPage (does not update status bits in PFN metadata)
-    zeroPage(pageNumtoZero);
-
-    acquireJLock(&PFNtoZero->lockBits);
-
-    // enqueue to zeroList (updates status bits in PFN metadata)
-    enqueuePage(&zeroListHead, PFNtoZero);
+    // set overloaded "writeinprogress" bit (to signify page is currently being zeroed)
+    PFNtoZero->writeInProgressBit = 1;
 
     releaseJLock(&PFNtoZero->lockBits);
 
-    // TODO - unlock page after move
-    //  PRINT(" - Moved page from free -> zero \n");
+
+    // Derive page number from PFN metadata
+    ULONG_PTR pageNumtoZero;
+    pageNumtoZero = PFNtoZero - PFNarray;
+
+
+    // zero the page contents, does not update status bits in PFN metadata
+    // note: can be page traded within this time, where status bits could change from ZERO to AWAITING_QUARANTINE
+    zeroPage(pageNumtoZero);
+
+
+    acquireJLock(&PFNtoZero->lockBits);
+
+
+    // clear "writeinprogress" bit (to signify page has been zeroed and can now be traded, once lock is released)
+    PFNtoZero->writeInProgressBit = 0;
+
+    if (PFNtoZero->statusBits == AWAITING_QUARANTINE) {
+
+        enqueuePage(&quarantineListHead, PFNtoZero);
+        PRINT(" - moved page from free -> quarantine\n");
+
+    } else {
+
+        // enqueue to zeroList (updates status bits in PFN metadata)
+        enqueuePage(&zeroListHead, PFNtoZero);
+
+    }
+
+    releaseJLock(&PFNtoZero->lockBits);
+
+    PRINT(" - Moved page from free -> zero \n");
 
     return TRUE;
 }
@@ -481,7 +398,7 @@ freePageTestWriter()
 
 
     if (PFNtoFree == NULL) {
-        // PRINT_ERROR("zero list empty - could not write out\n");
+        PRINT("zero list empty - could not write out\n");
         return FALSE;
     }
 
@@ -489,6 +406,7 @@ freePageTestWriter()
 
     // enqueue to freeList (updates status bits in PFN metadata)
     enqueuePage(&freeListHead, PFNtoFree);
+
     releaseJLock(&PFNtoFree->lockBits);
 
 
@@ -569,8 +487,15 @@ modifiedPageWriter()
     BOOLEAN bResult;
     bResult = writePageToFileSystem(PFNtoWrite);
 
+
     // Acquire lock to view PFN
     acquireJLock(&PFNtoWrite->lockBits);
+
+    // since we've marked the PFN as write in progress, it CANNOT be in zero or free state
+    //  - would require a decommit (via decommitVA), which checks the writeInProgressBit
+    //  - so, we can assert that it is in neither free nor zero
+    ASSERT (PFNtoWrite->statusBits != FREE && PFNtoWrite->statusBits != ZERO);
+
 
     // check if PFN has been decommitted
     if (PFNtoWrite->statusBits == AWAITING_FREE) {
@@ -595,15 +520,21 @@ modifiedPageWriter()
     // if write failed or the PFN has since been modified
     if (bResult != TRUE || PFNtoWrite->remodifiedBit == 1) {
         
-        ASSERT(PFNtoWrite->pageFileOffset != INVALID_PAGEFILE_INDEX);           // TODO - error here with bResult != TRUE (leaked a page)
+
+        ASSERT(PFNtoWrite->pageFileOffset != INVALID_PAGEFILE_INDEX);           // TODO - needs to be changed to take two mappings in allocate user physical page (WHy does this leak a page?)
             
+
+        // either way (write failed/PFN modified), clear PF index if it exists
         clearPFBitIndex(PFNtoWrite->pageFileOffset);
+
 
         PFNtoWrite->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
 
         if (PFNtoWrite->statusBits != ACTIVE) {
+
             enqueuePage(&modifiedListHead, PFNtoWrite);                     // TODO - CHECK (reenqueing if unable to write)
+
         }
         
         releaseJLock(&PFNtoWrite->lockBits);
@@ -611,7 +542,7 @@ modifiedPageWriter()
         if (bResult != TRUE) {
             PRINT_ERROR("[modifiedPageWriter] error writing out page\n");
         }  else {
-           PRINT("[modifiedPageWriter] Page has since been modified, clearing PF space\n");
+            PRINT("[modifiedPageWriter] Page has since been modified, clearing PF space\n");
         }
         
         return TRUE;
@@ -624,7 +555,12 @@ modifiedPageWriter()
     currPTE = PTEarray + PFNtoWrite->PTEindex;    
 
 
+    // if PFN has not since been faulted in to active, enqueue to standby list
+    // if it has been write faulted in, check the dirty bit
+    //  - if it is set, clear the PF bit index
+    //  - otherwise, continue
     if (PFNtoWrite->statusBits != ACTIVE) {
+
         ASSERT(currPTE->u1.hPTE.validBit != 1 && currPTE->u1.tPTE.transitionBit == 1);
 
         // enqueue page to standby (since has not been redirtied)
@@ -633,7 +569,9 @@ modifiedPageWriter()
         PRINT(" - Moved page from modified -> standby (wrote out to PageFile successfully)\n");
 
 
-    } else {
+    } 
+    else {
+
         ASSERT(currPTE->u1.hPTE.validBit == 1);
 
         if (currPTE->u1.hPTE.dirtyBit == 1) {
@@ -810,7 +748,7 @@ initVADList()
 
 
 VOID
-testRoutine()
+testRoutine(ULONG_PTR numPagesReturned)
 {
     PRINT_ALWAYS("[testRoutine]\n");
     
@@ -824,7 +762,7 @@ testRoutine()
 
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
-    ULONG_PTR testNum = NUM_PAGES * VM_MULTIPLIER;      //TEMPORARY
+    ULONG_PTR testNum = numPagesReturned * VM_MULTIPLIER;      //TEMPORARY
 
     PRINT_ALWAYS("Committing and then faulting in %llu pages\n", testNum);
 
@@ -838,7 +776,7 @@ testRoutine()
 
         testStatus = writeVA(testVA, testVA);
             
-        // trimPage(testVA);
+        // trimVA(testVA);
 
         /************ TRADING pages ***********/
 
@@ -870,11 +808,11 @@ testRoutine()
     for (int i = 0; i < testNum; i++) {
 
         // trim the VAs we have just tested (to transition, from active)
-        trimPage(testVA);
+        trimVA(testVA);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
 
 
-        #ifndef MULTITHREADING                      // TODO: move when we have modifiedpagewriter thread
+        #ifndef MULTITHREADING
 
         // alternate calling modifiedPageWriter and zeroPageWriter
         if (i % 2 == 0) {
@@ -959,7 +897,7 @@ testRoutine()
     testVA = leafVABlock;
 
     for (int i = 0; i < testNum; i++) {
-        // trimPage(testVA);
+        // trimVA(testVA);
 
         #ifdef CHECK_PAGEFILE
         // "leaks" pages in order to force standby->pf repurposing
@@ -980,7 +918,20 @@ testRoutine()
 
     testVA = leafVABlock;
 
+
+    // TODO - fix decommitVA
+
+    // decommitVA(testVA, testNum << PAGE_SHIFT);
+    // decommitVA(testVA, testNum * PAGE_SIZE);
+
     for (int i = 0; i < testNum; i++) {
+
+
+        // accessVA(testVA, READ_WRITE);
+        // if (* (PVOID*) testVA != testVA) {
+        //     PRINT_ALWAYS("does not match\n");
+
+        // }
 
         decommitVA(testVA, PAGE_SIZE);
 
@@ -1009,8 +960,10 @@ testRoutine()
     for (int i = 0; i < ACTIVE; i++) {
 
         pageCount += listHeads[i].count;
+
     }
     PRINT_ALWAYS("total page count %llu\n", pageCount);
+    ASSERT(numPagesReturned == pageCount);
 
 }
 
@@ -1095,7 +1048,7 @@ main(int argc, char** argv)
 
 
     /******************** call test routine ******************/
-    testRoutine();
+    testRoutine(numPagesReturned);
 
 
     PRINT_ALWAYS("----------------\nprogram complete\n----------------");

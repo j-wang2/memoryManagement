@@ -1,6 +1,7 @@
 #include "userMode-AWE-pageFile.h"
 #include "enqueue-dequeue.h"
 // #include "pagefile.h"
+#include "jLock.h"
 
 
 ULONG_PTR
@@ -42,11 +43,21 @@ setPFBitIndex()
 VOID
 clearPFBitIndex(ULONG_PTR pfVA) 
 {
+
+    // if pagefile address is invalid, return
     if (pfVA == INVALID_PAGEFILE_INDEX) {
+
         return;
+
     }
+
+    // keeps track of byte increments (i.e. "bytes place")
     ULONG_PTR i;
+
+    // keeps track of bit increments (i.e. "bits place")
     ULONG_PTR j;
+
+    // keeps track of current frame
     ULONG_PTR currFrame;
 
     i = pfVA / (sizeof(ULONG_PTR) * 8);
@@ -69,6 +80,7 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
 
     if (writeVANode == NULL) {
         PRINT("[modifiedPageWriter] TODO: waiting for release\n");
+        DebugBreak();
     }
 
     PVOID modifiedWriteVA;
@@ -79,40 +91,63 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
 
     ULONG_PTR bitIndex;
     bitIndex = setPFBitIndex();
+
+
     if (bitIndex == INVALID_PAGEFILE_INDEX) {
+
         PRINT_ERROR("no remaining space in pagefile - could not write out\n");
         return FALSE;
+
     }
+
 
     // map given page to the modifiedWriteVA
     if (!MapUserPhysicalPages(modifiedWriteVA, 1, &PFN)) {
-        PRINT_ERROR("error mapping modifiedWriteVA\n");
+
         clearPFBitIndex(bitIndex);
+
         enqueueVA(&writeVAListHead, writeVANode);
+
+        PRINT_ERROR("error mapping modifiedWriteVA\n");
+
         return FALSE;
+        
     }
 
     // get location in pagefile from bitindex
     void* PFLocation;
     PFLocation = (void*) ( (ULONG_PTR)pageFileVABlock + ( bitIndex << PAGE_SHIFT ) );        // equiv to bitIndex*page_size
 
+
     // copy the contents in the currentPFN out to the pagefile
     memcpy(PFLocation, modifiedWriteVA, PAGE_SIZE);
 
+
     // unmap modifiedWriteVA from page
     if (!MapUserPhysicalPages(modifiedWriteVA, 1, NULL)) {
-        PRINT_ERROR("error unmapping modifiedWriteVA\n");
-        clearPFBitIndex(bitIndex);                      // TODO - does order matter here?
+
+        clearPFBitIndex(bitIndex);
+
         enqueueVA(&writeVAListHead, writeVANode);
+
+        PRINT_ERROR("error unmapping modifiedWriteVA\n");
+
         return FALSE;
     }
+
 
     enqueueVA(&writeVAListHead, writeVANode);
 
 
     // add/update pageFileOffset field of PFN
     // ONLY updates if the mapuserphysical pages calls are also successful
+
+    acquireJLock(&PFNtoWrite->lockBits);
+
     PFNtoWrite->pageFileOffset = bitIndex;
+
+    releaseJLock(&PFNtoWrite->lockBits);
+
 
     PRINT("successfully wrote page to pagefile\n");
     return TRUE;
