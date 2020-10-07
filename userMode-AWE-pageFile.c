@@ -315,7 +315,6 @@ allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs) {
 }
 
 
-
 BOOLEAN
 zeroPage(ULONG_PTR PFN)
 {
@@ -994,26 +993,8 @@ testRoutine(ULONG_PTR numPagesReturned)
     /***************** DECOMMITTING AND CHECKING VAs **************/
 
     testVA = leafVABlock;
+    decommitVA(testVA, testNum << PAGE_SHIFT);
 
-
-    // TODO - fix decommitVA
-
-    // decommitVA(testVA, testNum << PAGE_SHIFT);
-    // decommitVA(testVA, testNum * PAGE_SIZE);
-
-    for (int i = 0; i < testNum; i++) {
-
-
-        // accessVA(testVA, READ_WRITE);
-        // if (* (PVOID*) testVA != testVA) {
-        //     PRINT_ALWAYS("does not match\n");
-
-        // }
-
-        decommitVA(testVA, PAGE_SIZE);
-
-        testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
-    }
 
     #ifdef MULTITHREADING
 
@@ -1098,6 +1079,7 @@ initializeVirtualMemory()
 
     return numPagesReturned;
 }
+
 
 VOID 
 main(int argc, char** argv) 

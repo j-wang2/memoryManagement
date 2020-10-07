@@ -391,28 +391,33 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
     for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
+
         if (currPTE == NULL) {
             PRINT_ERROR("[decommitVA] Invalid PTE address - fatal error\n")
             return FALSE;
         }
 
+
         // make a shallow copy/"snapshot" of the PTE to edit and check
         PTE tempPTE;
         tempPTE = *currPTE;
 
+
         currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
+
 
         // check if PTE is already zeroed
         if (tempPTE.u1.ulongPTE == 0) {
+
             PRINT("VA is already decommitted\n");
             continue;
+
         }
 
         // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
 
         else if (tempPTE.u1.hPTE.validBit == 1) {                       // valid/hardware format
         
-
 
             // get PFN
             PPFNdata currPFN;
@@ -434,12 +439,13 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
             #ifdef TESTING_VERIFY_ADDRESSES
             if (!(ULONG_PTR) currVA == * (ULONG_PTR*) currVA) {
+                
                 PRINT_ERROR("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
                 
             }
             #endif
 
-            // PRINT_ALWAYS("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+            PRINT_ALWAYS("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
             // PRINT("decommitting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) currVA, * (PCHAR *) currVA);
 
 
