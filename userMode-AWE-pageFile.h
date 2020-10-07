@@ -8,6 +8,8 @@
 #include <stdbool.h>
 #include <windows.h>
 #pragma comment(lib, "Advapi32.lib")
+#pragma comment(lib, "MinCore.lib")
+
 
 
 /*********** temporary testing macros ************/
@@ -17,6 +19,9 @@
 #define TESTING_ZERO
 #define TESTING_MODIFIED
 #define TESTING_VERIFY_ADDRESSES
+
+#define SHARED_PAGES
+
 
 
 /*********** number of physical memory pages to allocate (+ PF pages for total memory) **********/
@@ -201,6 +206,9 @@ extern listData readPFVAListHead;
 extern listData VADListHead;               // list of VADs
 
 
+extern CRITICAL_SECTION PTELock;
+
+
 // toggle multithreading on and off
 #define MULTITHREADING
 
@@ -288,16 +296,11 @@ zeroPageWriter();
 DWORD WINAPI
 zeroPageThread();
 
-/*
- * TODO (future, shared implementation): bump refcount
- *  - must prevent from being accessed via PTE while being written out
- *  - write in progress
- * 
- * 
- * 
+/* 
  * modifiedPageWriter: function to pull a page off modified list and write to pagefile
  * - checks if rhere are any pages on modified list
  * - if there are, call writePageToFileSystem, update status bits and enqueue PFN to standby list
+ * - when shared pages are added, bump refcount
  * 
  * returns BOOLEAN:
  *  - TRUE on success

@@ -128,6 +128,19 @@ dequeueSpecificPage(PPFNdata removePage);
 PVANode
 dequeueVA(PlistData listHead);
 
+
+/*
+ * dequeueLockedPage: SYNCHRONIZED wrapper function for dequeueVA that takes a listhead
+ *  - peeks at top item
+ * 
+ * REturns PVANode:
+ *  - item from head on success
+ *  - NULL on failure
+ * 
+ */
+PVANode
+dequeueLockedVA(PlistData listHead);
+
 /*
  * enqueueVA: wrapper function for enqueue
  *  - increments count of VA list

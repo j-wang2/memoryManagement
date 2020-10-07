@@ -97,7 +97,7 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     PFNstatus currStatus;
     currStatus = pageToTrade->statusBits;
 
-    if (currStatus != STANDBY && currStatus != MODIFIED){
+    if (currStatus != STANDBY && currStatus != MODIFIED) {
 
         releaseJLock(&(pageToTrade->lockBits));
         PRINT ("[tradeTransitionPage] Page is no longer on standby or modified list\n");
@@ -182,7 +182,7 @@ tradeVA(PVOID virtualAddress)
     originalValidBit = snapPTE.u1.hPTE.validBit;
 
 
-    if (snapPTE.u1.hPTE.validBit == 1){
+    if (snapPTE.u1.hPTE.validBit == 1) {
 
         BOOLEAN tResult;
         tResult = trimVA(virtualAddress);         // TODO: possible multithreading issues

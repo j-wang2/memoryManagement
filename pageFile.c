@@ -10,15 +10,15 @@ setPFBitIndex()
 
     ULONG_PTR bitIndex;
 
-    for (ULONG_PTR i = 0; i < ARRAYSIZE (pageFileBitArray); i++){
+    for (ULONG_PTR i = 0; i < ARRAYSIZE (pageFileBitArray); i++) {
 
         ULONG_PTR currFrame;
         currFrame = pageFileBitArray[i];
 
-        for (ULONG_PTR j = 0; j < (sizeof(currFrame) * 8); j++){
+        for (ULONG_PTR j = 0; j < (sizeof(currFrame) * 8); j++) {
 
             // free
-            if ((currFrame & 1) == 0){
+            if ((currFrame & 1) == 0) {
 
                 // reset currFrame
                 currFrame = pageFileBitArray[i];
@@ -76,7 +76,7 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
 {
 
     PVANode writeVANode;
-    writeVANode = dequeueVA(&writeVAListHead);
+    writeVANode = dequeueLockedVA(&writeVAListHead);
 
     if (writeVANode == NULL) {
         PRINT("[modifiedPageWriter] TODO: waiting for release\n");
@@ -111,7 +111,7 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
         PRINT_ERROR("error mapping modifiedWriteVA\n");
 
         return FALSE;
-        
+
     }
 
     // get location in pagefile from bitindex
@@ -151,4 +151,54 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
 
     PRINT("successfully wrote page to pagefile\n");
     return TRUE;
+}
+
+
+
+BOOLEAN
+readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex) {
+
+    
+    PVANode readPFVANode;
+    readPFVANode = dequeueLockedVA(&readPFVAListHead);
+
+    if (readPFVANode == NULL) {
+
+        PRINT("[pageFilePageFault] TODO: waiting for release\n");
+        DebugBreak();
+
+    }
+
+
+    PVOID readPFVA;
+    readPFVA = readPFVANode->VA;    
+
+
+    // map given page to the "zero" VA
+    if (!MapUserPhysicalPages(readPFVA, 1, &destPFN)) {
+
+        PRINT_ERROR("[pageFilePageFault]error remapping page to copy from PF\n");
+        return FALSE;
+
+    }
+
+    // TODO: function into file systemva
+
+    // get PFsourceVA from the pageFileIndex
+    PVOID PFsourceVA;
+    PFsourceVA = (PVOID) ( (ULONG_PTR) pageFileVABlock + (pageFileIndex << PAGE_SHIFT) );
+
+    
+    // copy contents from pagefile to our new page
+    memcpy(readPFVA, PFsourceVA, PAGE_SIZE);
+
+
+    // unmap VA from page - PFN is now filled w contents from pagefile
+    if (!MapUserPhysicalPages(readPFVA, 1, NULL)) {
+        PRINT_ERROR("error copying page from into page\n");
+        return FALSE;
+    }
+
+    return TRUE;
+    
 }

@@ -205,6 +205,8 @@ dequeuePageFromTail(PlistData listHead)
 
     checkAvailablePages(returnPFN->statusBits);
 
+    returnPFN->statusBits = NONE;
+
     return returnPFN;
 }
 
@@ -305,27 +307,16 @@ dequeueSpecificPage(PPFNdata removePage)
 }
 
 
-
 PVANode
 dequeueVA(PlistData listHead)
 {
-    
+
     PLIST_ENTRY headLink;
     headLink = &(listHead->head);
 
-    //lock listHead (since listHead values are not changed/accessed until dereferenced)
-    EnterCriticalSection(&(listHead->lock));
 
-    // verify list has items chained to the head
-    if (headLink->Flink == headLink) {
-        ASSERT(listHead->count == 0);
-
-        // unlock listHead
-        LeaveCriticalSection(&(listHead->lock));
-
-        return NULL;
-    }
-
+    // list must have items chained to the head (since dequeueLockedVA checks)
+    ASSERT(headLink->Flink != headLink);
     ASSERT(listHead->count != 0);
 
     PVANode returnVANode;
@@ -345,10 +336,51 @@ dequeueVA(PlistData listHead)
     // decrement count
     listHead->count--;
 
-    // unlock listHead
-    LeaveCriticalSection(&(listHead->lock));
-
     returnVANode = CONTAINING_RECORD(returnLink, VANode, links);
+
+    return returnVANode;
+
+}
+
+
+PVANode
+dequeueLockedVA(PlistData listHead)
+{
+    
+    PLIST_ENTRY headLink;
+    PVANode headNode;
+
+    while (TRUE) {
+
+        // check the listhead flink
+        headLink = (listHead->head).Flink;
+
+        if (headLink == &listHead->head) {
+            PRINT("[dequeueVA] List is empty - VA node cannot be dequeued\n");
+            return NULL;
+        }
+
+        headNode = CONTAINING_RECORD(headLink, VANode, links);
+
+        //lock listHead (since listHead values are not changed/accessed until dereferenced)
+        EnterCriticalSection(&(listHead->lock));
+
+        // verify node remains at head of list
+        if (headLink == (listHead->head).Flink) {
+            break;
+        }
+
+        LeaveCriticalSection(&listHead->lock);
+
+    }
+
+    PVANode returnVANode;
+    returnVANode = dequeueVA(listHead);
+
+    ASSERT(returnVANode == headNode);
+
+    LeaveCriticalSection(&listHead->lock);
+
 
     return returnVANode;
 

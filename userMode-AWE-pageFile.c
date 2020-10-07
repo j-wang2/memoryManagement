@@ -46,6 +46,10 @@ listData readPFVAListHead;
 
 listData VADListHead;               // list of VADs
 
+CRITICAL_SECTION PTELock;
+
+HANDLE physicalPageHandle;          // for shared pages
+
 
 BOOLEAN debugMode;
 
@@ -167,8 +171,18 @@ VOID
 initVABlock(ULONG_PTR numPages, ULONG_PTR pageSize)
 {
 
+
+    #ifdef SHARED_PAGES
+    MEM_EXTENDED_PARAMETER ExtendedParameters;
+    ExtendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
+    ExtendedParameters.Handle = physicalPageHandle;
+
+    leafVABlock = VirtualAlloc2(NULL, NULL, numPages*pageSize, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &ExtendedParameters, 1);      // equiv to numVAs*PAGE_SIZE
+
+    #else
     // creates a VAD node that we can define (i.e. is not pagefaulted by underlying kernel mm)
     leafVABlock = VirtualAlloc(NULL, numPages*pageSize, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
+    #endif
 
     if (leafVABlock == NULL) {
         exit(-1);
@@ -204,7 +218,7 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
     }
 
     // loop through all PFNs, MEM_COMMITTING PFN subsections and enqueueing to free for each page
-    for (int i = 0; i < numPages; i++){
+    for (int i = 0; i < numPages; i++) {
         PPFNdata newPFN;
         newPFN = PFNarray + aPFNs[i];
 
@@ -237,6 +251,9 @@ initPTEarray(ULONG_PTR numPages)
         exit(-1);
     }
 
+    InitializeCriticalSection(&PTELock);
+
+
 }
 
 
@@ -263,10 +280,11 @@ zeroPage(ULONG_PTR PFN)
 {
 
     PVANode zeroVANode;
-    zeroVANode = dequeueVA(&zeroVAListHead);
+    zeroVANode = dequeueLockedVA(&zeroVAListHead);
 
     if (zeroVANode == NULL) {
         PRINT("[zeroPage] TODO: waiting for release\n");
+        DebugBreak();
     }
 
     PVOID zeroVA;
@@ -278,6 +296,7 @@ zeroPage(ULONG_PTR PFN)
         enqueueVA(&zeroVAListHead, zeroVANode);
         return FALSE;
     }
+
 
     memset(zeroVA, 0, PAGE_SIZE);
 
@@ -521,7 +540,7 @@ modifiedPageWriter()
     if (bResult != TRUE || PFNtoWrite->remodifiedBit == 1) {
         
 
-        ASSERT(PFNtoWrite->pageFileOffset != INVALID_PAGEFILE_INDEX);           // TODO - needs to be changed to take two mappings in allocate user physical page (WHy does this leak a page?)
+        ASSERT(PFNtoWrite->pageFileOffset != INVALID_PAGEFILE_INDEX);
             
 
         // either way (write failed/PFN modified), clear PF index if it exists
@@ -531,9 +550,11 @@ modifiedPageWriter()
         PFNtoWrite->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
 
+        // If the page has not since been faulted in, re-enqueue to modified list
+        // (since page has either failed write or been re-modified, i.e. write->write fault->trim)
         if (PFNtoWrite->statusBits != ACTIVE) {
 
-            enqueuePage(&modifiedListHead, PFNtoWrite);                     // TODO - CHECK (reenqueing if unable to write)
+            enqueuePage(&modifiedListHead, PFNtoWrite);
 
         }
         
@@ -707,7 +728,19 @@ initVAList(PlistData VAListHead, ULONG_PTR numVAs)
 
     // alloc for VAs
     void* baseVA;
+
+    #ifdef SHARED_PAGES
+    MEM_EXTENDED_PARAMETER ExtendedParameters;
+    ExtendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
+    ExtendedParameters.Handle = physicalPageHandle;
+
+    baseVA = VirtualAlloc2(NULL, NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &ExtendedParameters, 1);      // equiv to numVAs*PAGE_SIZE
+
+    #else
     baseVA = VirtualAlloc(NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);      // equiv to numVAs*PAGE_SIZE
+
+    #endif
+
 
     // alloc for nodes
     PVANode baseNode;
@@ -767,11 +800,14 @@ testRoutine(ULONG_PTR numPagesReturned)
     PRINT_ALWAYS("Committing and then faulting in %llu pages\n", testNum);
 
 
+    commitVA(testVA, READ_ONLY, testNum << PAGE_SHIFT);    // commits with READ_ONLY permissions
+
+
     for (int i = 0; i < testNum; i++) {
 
         faultStatus testStatus;
 
-        commitVA(testVA, READ_ONLY, PAGE_SIZE);    // commits with READ_ONLY permissions
+        // commitVA(testVA, READ_ONLY, PAGE_SIZE);    // commits with READ_ONLY permissions
         protectVA(testVA, READ_WRITE, PAGE_SIZE);   // converts to read write
 
         testStatus = writeVA(testVA, testVA);
@@ -840,10 +876,10 @@ testRoutine(ULONG_PTR numPagesReturned)
     PRINT_ALWAYS("Creating threads (zeropage, freepage)\n");
 
 
-    HANDLE terminateZeroPageHandle;
-    terminateZeroPageHandle =  CreateEvent(NULL, TRUE, FALSE, NULL);
+    HANDLE terminateThreadsHandle;
+    terminateThreadsHandle =  CreateEvent(NULL, TRUE, FALSE, NULL);
 
-    if (terminateZeroPageHandle == INVALID_HANDLE_VALUE) {
+    if (terminateThreadsHandle == INVALID_HANDLE_VALUE) {
         PRINT_ERROR("failed to create event handle\n");
     }
 
@@ -851,7 +887,7 @@ testRoutine(ULONG_PTR numPagesReturned)
     HANDLE zeroPageThreadHandles[NUM_ZERO_THREADS];
     for (int i = 0; i < NUM_ZERO_THREADS; i++) {
 
-        zeroPageThreadHandles[i] = CreateThread(NULL, 0, zeroPageThread, terminateZeroPageHandle, 0, NULL);
+        zeroPageThreadHandles[i] = CreateThread(NULL, 0, zeroPageThread, terminateThreadsHandle, 0, NULL);
             
         if (zeroPageThreadHandles[i] == INVALID_HANDLE_VALUE) {
             PRINT_ERROR("failed to create zeroPage handle\n");
@@ -865,7 +901,7 @@ testRoutine(ULONG_PTR numPagesReturned)
 
     HANDLE freePageTestThreadHandles[NUM_ZERO_THREADS];
     for (int i = 0; i < NUM_ZERO_THREADS; i++) {
-        freePageTestThreadHandles[i] = CreateThread(NULL, 0, freePageTestThread, terminateZeroPageHandle, 0, NULL);
+        freePageTestThreadHandles[i] = CreateThread(NULL, 0, freePageTestThread, terminateThreadsHandle, 0, NULL);
 
         if (freePageTestThreadHandles[i] == INVALID_HANDLE_VALUE) {
             PRINT_ERROR("failed to create freePage handle\n");
@@ -877,7 +913,7 @@ testRoutine(ULONG_PTR numPagesReturned)
     HANDLE modifiedPageWriterThreadHandles[NUM_ZERO_THREADS];
     for (int i = 0; i < NUM_ZERO_THREADS; i++) {
 
-        modifiedPageWriterThreadHandles[i] = CreateThread(NULL, 0, modifiedPageThread, terminateZeroPageHandle, 0, NULL);
+        modifiedPageWriterThreadHandles[i] = CreateThread(NULL, 0, modifiedPageThread, terminateThreadsHandle, 0, NULL);
             
         if (modifiedPageWriterThreadHandles[i] == INVALID_HANDLE_VALUE) {
             PRINT_ERROR("failed to create modifiedPageWriting handle\n");
@@ -897,7 +933,7 @@ testRoutine(ULONG_PTR numPagesReturned)
     testVA = leafVABlock;
 
     for (int i = 0; i < testNum; i++) {
-        // trimVA(testVA);
+
 
         #ifdef CHECK_PAGEFILE
         // "leaks" pages in order to force standby->pf repurposing
@@ -940,7 +976,7 @@ testRoutine(ULONG_PTR numPagesReturned)
 
     #ifdef MULTITHREADING
 
-    SetEvent(terminateZeroPageHandle);
+    SetEvent(terminateThreadsHandle);
 
     WaitForMultipleObjects(NUM_ZERO_THREADS, zeroPageThreadHandles, TRUE, INFINITE);
 
@@ -980,12 +1016,7 @@ main(int argc, char** argv)
     // initialize zero/free/standby.. lists 
     initListHeads(listHeads);
 
-    // initialize zeroVAList, consisting of AWE addresses for zeroing pages
-    initVAList(&zeroVAListHead, NUM_ZERO_THREADS + 3);
 
-    initVAList(&writeVAListHead, NUM_ZERO_THREADS + 3);
-
-    initVAList(&readPFVAListHead, NUM_ZERO_THREADS + 3);
 
 
     // reserve AWE addresses for page trading
@@ -1014,9 +1045,40 @@ main(int argc, char** argv)
 
     ULONG_PTR numPagesReturned;
     numPagesReturned = NUM_PAGES;
+
+
+
+    #ifdef SHARED_PAGES
+
+    MEM_EXTENDED_PARAMETER ExtendedSectionParameters;
+
+    ExtendedSectionParameters.Type = MemSectionExtendedParameterUserPhysicalFlags;
+    ExtendedSectionParameters.ULong64 = 0;
     
-    BOOLEAN bResult;
-    bResult = (BOOLEAN) AllocateUserPhysicalPages(GetCurrentProcess(), &numPagesReturned, aPFNs);
+    physicalPageHandle = CreateFileMapping2(NULL,
+                                            NULL, 
+                                            SECTION_MAP_READ | SECTION_MAP_WRITE, 
+                                            PAGE_READWRITE, 
+                                            SEC_RESERVE, 
+                                            0, 
+                                            NULL, 
+                                            &ExtendedSectionParameters, 
+                                            1 );
+    
+    if (physicalPageHandle == NULL) {
+        PRINT_ERROR("could not create file mapping\n");
+        exit(-1);
+    }
+
+
+    #else
+    
+    physicalPageHandle = GetCurrentProcess();
+
+    #endif
+
+    BOOL bResult;
+    bResult = AllocateUserPhysicalPages(physicalPageHandle, &numPagesReturned, aPFNs);
 
     if (bResult != TRUE) {
         PRINT_ERROR("could not allocate pages successfully \n");
@@ -1029,7 +1091,14 @@ main(int argc, char** argv)
 
     // to achieve a greater VM address range than PM would otherwise allow
     ULONG_PTR virtualMemPages;
-    virtualMemPages = numPagesReturned * VM_MULTIPLIER;         // TODO - clean this up
+    virtualMemPages = numPagesReturned * VM_MULTIPLIER;
+
+        // initialize zeroVAList, consisting of AWE addresses for zeroing pages
+    initVAList(&zeroVAListHead, NUM_ZERO_THREADS + 3);
+
+    initVAList(&writeVAListHead, NUM_ZERO_THREADS + 3);
+
+    initVAList(&readPFVAListHead, NUM_ZERO_THREADS + 3);
 
 
     /******************* initialize data structures ****************/

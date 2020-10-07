@@ -244,6 +244,9 @@ trimVA(void* virtualAddress)
     PTEtoTrim.u1.ulongPTE = 0;
 
 
+    // TODO - need to lock PTE from here until the update of the PTE
+    EnterCriticalSection(&PTELock);
+
     // unmap page from VA (invalidates hardwarePTE)
     MapUserPhysicalPages(virtualAddress, 1, NULL);
 
@@ -256,7 +259,7 @@ trimVA(void* virtualAddress)
 
         else if (oldPTE.u1.hPTE.dirtyBit == 1) {
             
-            // to notify modified writer that page has since been re-modified
+            // notify modified writer that page has been re-modified since initial write began
             PFNtoTrim->remodifiedBit = 1;
 
             PFNtoTrim->statusBits = MODIFIED;
@@ -288,6 +291,9 @@ trimVA(void* virtualAddress)
     PTEtoTrim.u1.tPTE.permissions = getPTEpermissions(oldPTE);
 
     * (volatile PTE *) PTEaddress = PTEtoTrim;
+    
+    LeaveCriticalSection(&PTELock);  //todo-fix
+    
 
     releaseJLock(&PFNtoTrim->lockBits);
 
@@ -406,15 +412,6 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
         else if (tempPTE.u1.hPTE.validBit == 1) {                       // valid/hardware format
         
-            #ifdef TESTING_VERIFY_ADDRESSES
-            if (!(ULONG_PTR) currVA == * (ULONG_PTR*) currVA) {
-                PRINT_ERROR("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
-                
-            }
-            #endif
-
-            PRINT_ALWAYS("decommiting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
-            // PRINT("decommiting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) currVA, * (PCHAR *) currVA);
 
 
             // get PFN
@@ -434,6 +431,17 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
                 continue;
 
             }
+
+            #ifdef TESTING_VERIFY_ADDRESSES
+            if (!(ULONG_PTR) currVA == * (ULONG_PTR*) currVA) {
+                PRINT_ERROR("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+                
+            }
+            #endif
+
+            // PRINT_ALWAYS("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+            // PRINT("decommitting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) currVA, * (PCHAR *) currVA);
+
 
             // unmap VA from page
             BOOL bResult;

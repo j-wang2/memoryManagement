@@ -172,7 +172,6 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a brief lack of permissions protection
 
 
-    // TODO - check return values & allow multiple mappings to the same page
     // assign VA to point at physical page, mirroring our local PTE change
     BOOL bResult;
     bResult = MapUserPhysicalPages(virtualAddress, 1, &pageNum);
@@ -181,7 +180,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
         PRINT("[pageFault] two mappings at one page, not an error\n");
         ASSERT(FALSE);
-        
+
     }
 
     // update physical permissions of hardware PTE to match our software reference.
@@ -220,60 +219,46 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     // dequeue a page of memory from freed list
     PPFNdata freedPFN;
-    freedPFN = getPage();
 
-    if (freedPFN == NULL) {
-        PRINT_ERROR("[pageFilePageFault] failed to successfully acquire PFN in getPage\n");
-        return NO_FREE_PAGES;
+    while (TRUE) {
+        freedPFN = getPage();
+
+        if (freedPFN == NULL) {
+            // PRINT_ERROR("[pageFilePageFault] failed to successfully acquire PFN in getPage\n");
+
+            // TODO - fix
+            // HANDLE pageEventHandles[] = {&zeroListHead.newPagesEvent, &freeListHead.newPagesEvent, &standbyListHead.newPagesEvent};
+
+
+            // WaitForMultipleObjects(3, pageEventHandles, TRUE, INFINITE);
+
+            // return NO_FREE_PAGES;
+            continue;
+        } else {
+            break;
+        }
     }
 
-    // setting status bits to active
-    freedPFN->statusBits = ACTIVE;
+
+    // setting status bits to standby (read in progress)
+    freedPFN->statusBits = STANDBY;
 
     // get page number of the new page we/re allocating
     pageNum = freedPFN - PFNarray;
 
 
-    PVANode readPFVANode;
-    readPFVANode = dequeueVA(&readPFVAListHead);    // TODO: locking
-
-    if (readPFVANode == NULL) {
-
-        PRINT("[pageFilePageFault] TODO: waiting for release\n");
-        DebugBreak();
-
-    }
-
-
-    PVOID readPFVA;
-    readPFVA = readPFVANode->VA;    
-
-
-    // map given page to the "zero" VA
-    if (!MapUserPhysicalPages(readPFVA, 1, &pageNum)) {
-
-        PRINT_ERROR("[pageFilePageFault]error remapping page to copy from PF\n");
-        return FALSE;
-
-    }
-
-    // TODO: function into file systemva
-
-    // get PFsourceVA from the pageFileIndex
-    PVOID PFsourceVA;
-    PFsourceVA = (PVOID) ( (ULONG_PTR) pageFileVABlock + (snapPTE.u1.pfPTE.pageFileIndex << PAGE_SHIFT) );
-
+    BOOL bResult;
+    bResult = FALSE;
     
-    // copy contents from pagefile to our new page
-    memcpy(readPFVA, PFsourceVA, PAGE_SIZE);
+    while (bResult != TRUE) {
 
+        bResult = readPageFromFileSystem(pageNum, snapPTE.u1.pfPTE.pageFileIndex);
 
-    // unmap VA from page - PFN is now filled w contents from pagefile
-    if (!MapUserPhysicalPages(readPFVA, 1, NULL)) {
-        PRINT_ERROR("error copying page from into page\n");
-        return FALSE;
     }
 
+
+    // PTELOCK
+    EnterCriticalSection(&PTELock);
     
     ULONG_PTR PTEindex;
     PTEindex = masterPTE - PTEarray;
@@ -281,6 +266,11 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     // set PFN PTE index
     freedPFN->PTEindex = PTEindex;
+
+
+    // set status to active
+    freedPFN->statusBits = ACTIVE;
+
 
     // set hardware PTE to valid
     newPTE.u1.hPTE.validBit = 1;
@@ -324,6 +314,10 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     // update physical permissions of hardware PTE to match our software reference.
     VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[pageFileRWEpermissions], &oldPermissions);
+
+    //PTELOCK - CHECK
+    LeaveCriticalSection(&PTELock);
+
 
     return SUCCESS;
 
@@ -477,7 +471,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
             acquireJLock(&currPFN->lockBits);
 
             // if another thread has since changed the PTE
-            if (oldPTE.u1.ulongPTE != currPTE->u1.ulongPTE){
+            if (oldPTE.u1.ulongPTE != currPTE->u1.ulongPTE) {
 
                 releaseJLock(&currPFN->lockBits);
                 continue;
@@ -498,7 +492,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
             acquireJLock(&currPFN->lockBits);
 
             // if another thread has since changed the PTE
-            if (oldPTE.u1.ulongPTE != currPTE->u1.ulongPTE){
+            if (oldPTE.u1.ulongPTE != currPTE->u1.ulongPTE) {
 
                 releaseJLock(&currPFN->lockBits);
                 continue;
@@ -511,7 +505,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
 
             // if page has since changed status, resnap PTE and check again
-            if (status == PAGE_STATE_CHANGE){
+            if (status == PAGE_STATE_CHANGE) {
 
                 continue;
 
@@ -523,17 +517,28 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS && oldPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) {          // PAGEFILE STATE PTE
 
             // TODO - still needs to be locked (to prevent other threads faulting OR decommitting)
-
+            EnterCriticalSection(&PTELock);
             status = pageFilePageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);  
+
+            LeaveCriticalSection(&PTELock);
+
             return status;
+
 
         }
         else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS) {                        // DEMAND ZERO STATE PTE  
 
             // TODO - still needs to be locked (to prevent other threads faulting OR decommitting)
+            EnterCriticalSection(&PTELock);
 
             status = demandZeroPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
+
+            LeaveCriticalSection(&PTELock);
+
             return status;
+
+            //LEFT OFF HERE
+
 
         }
         else if (oldPTE.u1.ulongPTE == 0) {                                 // ZERO STATE PTE

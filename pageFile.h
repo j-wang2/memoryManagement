@@ -39,4 +39,16 @@ clearPFBitIndex(ULONG_PTR pfVA);
 BOOLEAN
 writePageToFileSystem(PPFNdata PFNtoWrite);
 
+
+/*
+ * readPageFromFileSystem: function to read in a given page from file system
+ * 
+ * returns BOOLEAN:
+ *  - TRUE on success
+ *  - FALSE on failure
+ * 
+ */
+BOOLEAN
+readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex);
+
 #endif
