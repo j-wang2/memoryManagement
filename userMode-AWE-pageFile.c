@@ -54,32 +54,6 @@ HANDLE physicalPageHandle;          // for shared pages
 BOOLEAN debugMode;
 
 
-PPTE
-getPTE(void* virtualAddress)
-{
-    // verify VA param is within the range of the VA block
-    if (virtualAddress < leafVABlock || virtualAddress >= leafVABlockEnd) {
-        PRINT_ERROR("access violation \n");
-        return NULL;
-    }
-
-    // get VA's offset into the leafVABlock
-    ULONG_PTR offset;
-    offset = (ULONG_PTR) virtualAddress - (ULONG_PTR) leafVABlock;
-
-    // convert offset to pagetable index
-    ULONG_PTR pageTableIndex;
-
-    // divide offset by PAGE_SIZE
-    pageTableIndex = offset >> PAGE_SHIFT;
-
-    // get the corresponding page table entry from the PTE array
-    PPTE currPTE;
-    currPTE = PTEarray + pageTableIndex;
-
-    return currPTE;
-}
-
 
 BOOL
 LoggedSetLockPagesPrivilege ( HANDLE hProcess,
@@ -168,16 +142,18 @@ getPrivilege ()
 
 
 VOID 
-initVABlock(ULONG_PTR numPages, ULONG_PTR pageSize)
+initVABlock(ULONG_PTR numPages)
 {
 
 
-    #ifdef SHARED_PAGES
-    MEM_EXTENDED_PARAMETER ExtendedParameters;
-    ExtendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
-    ExtendedParameters.Handle = physicalPageHandle;
+    #ifdef MULTIPLE_MAPPINGS
 
-    leafVABlock = VirtualAlloc2(NULL, NULL, numPages*pageSize, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &ExtendedParameters, 1);      // equiv to numVAs*PAGE_SIZE
+    MEM_EXTENDED_PARAMETER extendedParameters;
+    extendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
+    extendedParameters.Handle = physicalPageHandle;
+
+
+    leafVABlock = VirtualAlloc2(NULL, NULL, numPages << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &extendedParameters, 1);      // equiv to numVAs*PAGE_SIZE
 
     #else
     // creates a VAD node that we can define (i.e. is not pagefaulted by underlying kernel mm)
@@ -273,6 +249,71 @@ initPageFile(ULONG_PTR diskSize)
     totalCommittedPages++;
 
 }
+
+
+ULONG_PTR
+allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs) {
+
+    // secure privilege for the code
+    BOOLEAN privResult;
+    privResult = getPrivilege();
+    if (privResult != TRUE) {
+        PRINT_ERROR("could not get privilege successfully \n");
+        exit(-1);
+    }    
+
+
+    ULONG_PTR numPagesReturned;
+    numPagesReturned = numPages;
+
+
+
+    #ifdef MULTIPLE_MAPPINGS
+
+    MEM_EXTENDED_PARAMETER extendedParameters;
+
+    extendedParameters.Type = MemSectionExtendedParameterUserPhysicalFlags;
+    extendedParameters.ULong64 = 0;
+    
+    physicalPageHandle = CreateFileMapping2(NULL,
+                                            NULL, 
+                                            SECTION_MAP_READ | SECTION_MAP_WRITE, 
+                                            PAGE_READWRITE, 
+                                            SEC_RESERVE, 
+                                            0, 
+                                            NULL, 
+                                            &extendedParameters, 
+                                            1 );
+    
+    if (physicalPageHandle == NULL) {
+        PRINT_ERROR("could not create file mapping\n");
+        exit(-1);
+    }
+
+
+    #else
+    
+    physicalPageHandle = GetCurrentProcess();
+
+    #endif
+
+    BOOL bResult;
+    bResult = AllocateUserPhysicalPages(physicalPageHandle, &numPagesReturned, aPFNs);
+
+    if (bResult != TRUE) {
+        PRINT_ERROR("could not allocate pages successfully \n");
+        exit(-1);
+    }
+
+    if (numPagesReturned != numPages) {
+        PRINT("allocated only %llu pages out of %u pages requested\n", numPagesReturned, NUM_PAGES);
+    }
+
+    return numPagesReturned;
+
+
+}
+
 
 
 BOOLEAN
@@ -729,7 +770,7 @@ initVAList(PlistData VAListHead, ULONG_PTR numVAs)
     // alloc for VAs
     void* baseVA;
 
-    #ifdef SHARED_PAGES
+    #ifdef MULTIPLE_MAPPINGS
     MEM_EXTENDED_PARAMETER ExtendedParameters;
     ExtendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
     ExtendedParameters.Handle = physicalPageHandle;
@@ -1004,20 +1045,11 @@ testRoutine(ULONG_PTR numPagesReturned)
 }
 
 
-VOID 
-main(int argc, char** argv) 
+ULONG_PTR
+initializeVirtualMemory()
 {
-
-    /*********** switch to toggle verbosity (print statements) *************/
-    if (argc > 1 && strcmp(argv[1], "-v") == 0) {
-        debugMode = TRUE;
-    }
-
-    // initialize zero/free/standby.. lists 
+    // initialize zero/free/standby lists 
     initListHeads(listHeads);
-
-
-
 
     // reserve AWE addresses for page trading
     pageTradeDestVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
@@ -1034,66 +1066,15 @@ main(int argc, char** argv)
         PRINT_ERROR("failed to allocate PFNarray\n");
     }
 
-    // secure privilege for the code
-    BOOLEAN privResult;
-    privResult = getPrivilege();
-    if (privResult != TRUE) {
-        PRINT_ERROR("could not get privilege successfully \n");
-        exit(-1);
-    }    
-
-
     ULONG_PTR numPagesReturned;
-    numPagesReturned = NUM_PAGES;
-
-
-
-    #ifdef SHARED_PAGES
-
-    MEM_EXTENDED_PARAMETER ExtendedSectionParameters;
-
-    ExtendedSectionParameters.Type = MemSectionExtendedParameterUserPhysicalFlags;
-    ExtendedSectionParameters.ULong64 = 0;
-    
-    physicalPageHandle = CreateFileMapping2(NULL,
-                                            NULL, 
-                                            SECTION_MAP_READ | SECTION_MAP_WRITE, 
-                                            PAGE_READWRITE, 
-                                            SEC_RESERVE, 
-                                            0, 
-                                            NULL, 
-                                            &ExtendedSectionParameters, 
-                                            1 );
-    
-    if (physicalPageHandle == NULL) {
-        PRINT_ERROR("could not create file mapping\n");
-        exit(-1);
-    }
-
-
-    #else
-    
-    physicalPageHandle = GetCurrentProcess();
-
-    #endif
-
-    BOOL bResult;
-    bResult = AllocateUserPhysicalPages(physicalPageHandle, &numPagesReturned, aPFNs);
-
-    if (bResult != TRUE) {
-        PRINT_ERROR("could not allocate pages successfully \n");
-        exit(-1);
-    }
-
-    if (numPagesReturned != NUM_PAGES) {
-        PRINT("allocated only %llu pages out of %u pages requested\n", numPagesReturned, NUM_PAGES);
-    }
+    numPagesReturned = allocatePhysPages(NUM_PAGES, aPFNs);
 
     // to achieve a greater VM address range than PM would otherwise allow
     ULONG_PTR virtualMemPages;
     virtualMemPages = numPagesReturned * VM_MULTIPLIER;
 
-        // initialize zeroVAList, consisting of AWE addresses for zeroing pages
+
+    // initialize zeroVAList, consisting of AWE addresses for zeroing pages
     initVAList(&zeroVAListHead, NUM_ZERO_THREADS + 3);
 
     initVAList(&writeVAListHead, NUM_ZERO_THREADS + 3);
@@ -1104,7 +1085,7 @@ main(int argc, char** argv)
     /******************* initialize data structures ****************/
 
     // create virtual address block
-    initVABlock(virtualMemPages, PAGE_SIZE);
+    initVABlock(virtualMemPages);
 
     // create local PFN metadata array
     initPFNarray(aPFNs, numPagesReturned);
@@ -1114,6 +1095,22 @@ main(int argc, char** argv)
 
     // create PageFile section of memory
     initPageFile(PAGEFILE_SIZE);
+
+    return numPagesReturned;
+}
+
+VOID 
+main(int argc, char** argv) 
+{
+
+    /*********** switch to toggle verbosity (print statements) *************/
+    if (argc > 1 && strcmp(argv[1], "-v") == 0) {
+        debugMode = TRUE;
+    }
+    
+    ULONG_PTR numPagesReturned;
+
+    numPagesReturned = initializeVirtualMemory();
 
 
     /******************** call test routine ******************/
@@ -1126,5 +1123,6 @@ main(int argc, char** argv)
     VirtualFree(leafVABlock, 0, MEM_RELEASE);
     VirtualFree(PFNarray, 0, MEM_RELEASE);
     VirtualFree(PTEarray, 0, MEM_RELEASE);
+    VirtualFree(pageFileVABlock, 0, MEM_RELEASE);
 
 }

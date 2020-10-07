@@ -16,7 +16,7 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
 
     while (PFstatus == SUCCESS) {
 
-#ifdef TEMP_TESTING
+    #ifdef TEMP_TESTING
 
         PPTE currPTE;
         currPTE = getPTE(virtualAddress);
@@ -61,7 +61,7 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
         }
 
 
-#else
+    #else
         _try {
 
             if (RWEpermissions == READ_ONLY || READ_EXECUTE) {

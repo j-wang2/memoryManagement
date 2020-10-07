@@ -3,6 +3,16 @@
 
 // #include "userMode-AWE-pageFile.h"
 
+/*
+ * getPTE: function to find corresponding PTE from a given VA
+ * 
+ * Returns PPTE
+ *  - currPTE (corresponding PTE) on success
+ *  - NULL on failure (access violation, VA outside of range)
+ */
+PPTE
+getPTE(void* virtualAddress);
+
 
 /*
  * getPTEpermissions: function to convert input VALID PTE's permissions (as separate bits) into a return PTEpermissions (3 consecutive bits)

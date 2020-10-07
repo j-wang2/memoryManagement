@@ -1,6 +1,34 @@
 #include "userMode-AWE-pageFile.h"
 
 
+PPTE
+getPTE(void* virtualAddress)
+{
+    // verify VA param is within the range of the VA block
+    if (virtualAddress < leafVABlock || virtualAddress >= leafVABlockEnd) {
+        PRINT_ERROR("access violation \n");
+        return NULL;
+    }
+
+    // get VA's offset into the leafVABlock
+    ULONG_PTR offset;
+    offset = (ULONG_PTR) virtualAddress - (ULONG_PTR) leafVABlock;
+
+    // convert offset to pagetable index
+    ULONG_PTR pageTableIndex;
+
+    // divide offset by PAGE_SIZE
+    pageTableIndex = offset >> PAGE_SHIFT;
+
+    // get the corresponding page table entry from the PTE array
+    PPTE currPTE;
+    currPTE = PTEarray + pageTableIndex;
+
+    return currPTE;
+}
+
+
+
 PTEpermissions
 getPTEpermissions(PTE curr)
 {

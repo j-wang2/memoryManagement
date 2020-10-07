@@ -14,22 +14,23 @@
 
 /*********** temporary testing macros ************/
 // #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
-#define TEMP_TESTING
+#define TEMP_TESTING                                // temporary workaround for PF due to 
 #define NUM_ZERO_THREADS 3
-#define TESTING_ZERO
-#define TESTING_MODIFIED
-#define TESTING_VERIFY_ADDRESSES
+#define TESTING_ZERO                                // toggles zero page thread
+#define TESTING_MODIFIED                            // toggles modified page writer thread
+#define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
 
-#define SHARED_PAGES
+#define MULTIPLE_MAPPINGS                           // enables multiple mappings
 
 
 
 /*********** number of physical memory pages to allocate (+ PF pages for total memory) **********/
 // #define NUM_PAGES 30
 #define NUM_PAGES 512
+// #define NUM_PAGES 2048
 // #define NUM_PAGES 6400000
 
-#define VM_MULTIPLIER 10                            // VM space is this many times larger than num physical pages successfully allocated
+#define VM_MULTIPLIER 10                          // VM space is this many times larger than num physical pages successfully allocated
 
 
 
@@ -165,6 +166,7 @@ typedef enum {
 } readWrite;
 
 
+
 /**************  GLOBAL VARIABLES  *************/
 extern BOOLEAN debugMode;
 
@@ -205,25 +207,11 @@ extern listData readPFVAListHead;
 
 extern listData VADListHead;               // list of VADs
 
-
-extern CRITICAL_SECTION PTELock;
+extern CRITICAL_SECTION PTELock;            // coarse-grained lock on page table/directory
 
 
 // toggle multithreading on and off
 #define MULTITHREADING
-
-
-/*
- * getPTE: function to find corresponding PTE from a given VA
- * 
- * Returns PPTE
- *  - currPTE (corresponding PTE) on success
- *  - NULL on failure (access violation, VA outside of range)
- */
-PPTE
-getPTE(void* virtualAddress);
-
-
 
 
 
@@ -270,7 +258,7 @@ getPrivilege ();
  * 
  */
 VOID
-initVABlock(ULONG_PTR numPages, ULONG_PTR pageSize);
+initVABlock(ULONG_PTR numPages);
 
 
 VOID
@@ -283,6 +271,10 @@ initPTEarray(ULONG_PTR numPages);
 
 VOID
 initPageFile(ULONG_PTR diskSize);
+
+
+ULONG_PTR
+allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs);
 
 
 BOOLEAN
@@ -298,7 +290,7 @@ zeroPageThread();
 
 /* 
  * modifiedPageWriter: function to pull a page off modified list and write to pagefile
- * - checks if rhere are any pages on modified list
+ * - checks if there are any pages on modified list
  * - if there are, call writePageToFileSystem, update status bits and enqueue PFN to standby list
  * - when shared pages are added, bump refcount
  * 

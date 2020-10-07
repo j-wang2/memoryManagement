@@ -4,6 +4,7 @@
 #include "pageFault.h"
 #include "jLock.h"
 #include "VApermissions.h"
+#include "PTEpermissions.h"
 
 BOOLEAN
 tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)
