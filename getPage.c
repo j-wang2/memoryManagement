@@ -1,15 +1,15 @@
 #include "userMode-AWE-pageFile.h"
 #include "enqueue-dequeue.h"
-
+#include "jLock.h"
 
 PPFNdata
-getZeroPage()
+getZeroPage(BOOLEAN returnLocked)
 {
     PPFNdata returnPFN;
     if (zeroListHead.count != 0) {
 
         // get a locked page from the zero list head
-        returnPFN = dequeueLockedPage(&zeroListHead, FALSE);
+        returnPFN = dequeueLockedPage(&zeroListHead, returnLocked);
 
         if (returnPFN == NULL) {
             PRINT("[getPage] zero list empty\n");
@@ -29,14 +29,14 @@ getZeroPage()
 
 
 PPFNdata 
-getFreePage()
+getFreePage(BOOLEAN returnLocked)
 {
 
     PPFNdata returnPFN;
 
     if (freeListHead.count != 0) {
 
-        returnPFN = dequeueLockedPage(&freeListHead, FALSE);
+        returnPFN = dequeueLockedPage(&freeListHead, returnLocked);
 
         if (returnPFN == NULL) {
             PRINT("[getPage] free list empty\n");
@@ -54,15 +54,18 @@ getFreePage()
 
 
 PPFNdata 
-getStandbyPage()
+getStandbyPage(BOOLEAN returnLocked)
 {
 
     PPFNdata returnPFN;
 
     if (standbyListHead.count != 0) {
 
-        // dequeue a page from standby list
-        returnPFN = dequeueLockedPageFromTail(&standbyListHead, FALSE);
+        //
+        // dequeue a page from standby page (with lock bits set, since PTE lock acquisition could cause deadlock)
+        //
+
+        returnPFN = dequeueLockedPageFromTail(&standbyListHead, TRUE);
 
         if (returnPFN == NULL) {
             PRINT("[getPage] standby list empty\n");
@@ -71,7 +74,7 @@ getStandbyPage()
 
         // get PTE
         PPTE currPTE;
-        currPTE = PTEarray + returnPFN->PTEindex;       // TODO: possible multithreading compatibility issues
+        currPTE = PTEarray + returnPFN->PTEindex;
 
         // create copy of the currPTE to reference
         PTE oldPTE;
@@ -111,24 +114,36 @@ getStandbyPage()
 
         // copy newPTE back into currPTE
         * (volatile PTE *) currPTE = newPTE;
+       
+        //
+        // release PFN lock once PTE is written out (if returnLocked is FALSE)
+        //
+
+        if (returnLocked == FALSE) {
+    
+            releaseJLock(&returnPFN->lockBits);
+
+        }
     
         return returnPFN;
 
     } else {
+
         return NULL;
+
     }
 } 
 
 
 PPFNdata
-getPage()
+getPage(BOOLEAN returnLocked)
 {
 
     PPFNdata returnPFN;
 
     #ifdef CHECK_PAGEFILE                               // to check standby -> pf repurposing
     // standby list
-    returnPFN = getStandbyPage();
+    returnPFN = getStandbyPage(returnLocked);
     if (returnPFN != NULL) {
         ULONG_PTR PFN;
         PFN = returnPFN - PFNarray;
@@ -147,7 +162,7 @@ getPage()
 
 
     // Zero list
-    returnPFN = getZeroPage();
+    returnPFN = getZeroPage(returnLocked);
     if (returnPFN != NULL) {
 
         // set PF offset to our "null" value in the PFN metadata
@@ -161,7 +176,7 @@ getPage()
 
 
     // free list
-    returnPFN = getFreePage();
+    returnPFN = getFreePage(returnLocked);
     if (returnPFN != NULL) {
 
         ULONG_PTR PFN;
@@ -180,7 +195,7 @@ getPage()
 
 
     // standby list
-    returnPFN = getStandbyPage();
+    returnPFN = getStandbyPage(returnLocked);
     if (returnPFN != NULL) {
         ULONG_PTR PFN;
         PFN = returnPFN - PFNarray;
@@ -201,4 +216,31 @@ getPage()
     
     return returnPFN;                                           // should be NULL
 
+}
+
+
+PPFNdata
+getPageAlways(BOOLEAN returnLocked) 
+{
+    PPFNdata freedPFN;
+    while (TRUE) {
+
+        // dequeue and return a LOCKED page (PFN lock must be released)
+        freedPFN = getPage(returnLocked);
+
+        if (freedPFN == NULL) {
+            // PRINT_ERROR("[pageFilePageFault] failed to successfully acquire PFN in getPage\n");
+
+            HANDLE pageEventHandles[] = {&zeroListHead.newPagesEvent, &freeListHead.newPagesEvent, &standbyListHead.newPagesEvent};
+
+
+            WaitForMultipleObjects(3, pageEventHandles, TRUE, INFINITE);
+
+            // return NO_FREE_PAGES;
+            continue;
+        } else {
+            break;
+        }
+    }
+    return freedPFN;
 }

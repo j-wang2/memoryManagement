@@ -42,6 +42,8 @@ VOID
 enqueuePage(PlistData listHead, PPFNdata PFN)
 {
 
+    ASSERT(PFN->lockBits != 0);
+
     //lock listHead (since listHead values are not changed/accessed until dereferenced)
     EnterCriticalSection(&(listHead->lock));
 
@@ -396,6 +398,113 @@ enqueueVA(PlistData listHead, PVANode VANode)
 
     // enqueue onto list
     enqueue( &(listHead->head), &(VANode->links) );
+
+    // update pagecount of that list
+    listHead->count++;
+
+    #ifdef MULTITHREADING
+    SetEvent(listHead->newPagesEvent);
+    #endif
+
+    // unlock listHead
+    LeaveCriticalSection(&(listHead->lock));
+
+}
+
+
+PeventNode
+dequeueEvent(PlistData listHead)
+{
+    PLIST_ENTRY headLink;
+    PeventNode returnNode;
+    PLIST_ENTRY returnLink;
+    PLIST_ENTRY newFirst;
+    headLink = &(listHead->head);
+
+
+    // list must have items chained to the head (since dequeueLockedVA checks)
+    ASSERT(headLink->Flink != headLink);
+    ASSERT(listHead->count != 0);
+
+    returnLink = headLink->Flink;
+    newFirst = returnLink->Flink;
+
+    // set headLink's flink to the return item's flink
+    headLink->Flink = newFirst;
+    newFirst->Blink = headLink;
+
+    // set returnLink's flink/blink to null before returning it
+    returnLink->Flink = NULL;
+    returnLink->Blink = NULL;
+
+    // decrement count
+    listHead->count--;
+
+    returnNode = CONTAINING_RECORD(returnLink, eventNode, links);
+
+    return returnNode;
+}
+
+
+PeventNode
+dequeueLockedEvent(PlistData listHead)
+{
+
+    PLIST_ENTRY headLink;
+    PeventNode headNode;
+
+    while (TRUE) {
+
+        // check the listhead flink
+        headLink = (listHead->head).Flink;
+
+        if (headLink == &listHead->head) {
+            PRINT("[dequeueVA] List is empty - VA node cannot be dequeued\n");
+            return NULL;
+        }
+
+        headNode = CONTAINING_RECORD(headLink, eventNode, links);
+
+        //lock listHead (since listHead values are not changed/accessed until dereferenced)
+        EnterCriticalSection(&(listHead->lock));
+
+        // verify node remains at head of list
+        if (headLink == (listHead->head).Flink) {
+            break;
+        }
+
+        LeaveCriticalSection(&listHead->lock);
+
+    }
+
+    PeventNode returnNode;
+    returnNode = dequeueEvent(listHead);
+
+    ASSERT(returnNode == headNode);
+
+    BOOL bResult;
+    bResult = ResetEvent(returnNode->event);
+    
+    if (bResult != TRUE) {
+        PRINT_ERROR("[dequeueLockedEvent] unable to reset event\n");
+    }
+
+    LeaveCriticalSection(&listHead->lock);
+
+
+    return returnNode;
+}
+
+
+VOID
+enqueueEvent(PlistData listHead, PeventNode eventNode)
+{
+    
+    //lock listHead (since listHead values are not changed/accessed until dereferenced)
+    EnterCriticalSection(&(listHead->lock));
+
+    // enqueue onto list
+    enqueue( &(listHead->head), &(eventNode->links) );
 
     // update pagecount of that list
     listHead->count++;

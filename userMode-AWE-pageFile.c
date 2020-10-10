@@ -43,8 +43,10 @@ listData zeroVAListHead;            // listHead of zeroVAs used for zeroing PFNs
 listData writeVAListHead;           // listHead of writeVAs used for writing to page file
 listData readPFVAListHead;
 
-
 listData VADListHead;               // list of VADs
+
+listData readInProgEventListHead;
+
 
 CRITICAL_SECTION PTELock;
 
@@ -132,11 +134,11 @@ LoggedSetLockPagesPrivilege ( HANDLE hProcess,
 }
 
 
-BOOLEAN
+BOOL
 getPrivilege ()
 {
-    BOOLEAN bResult;
-    bResult = (BOOLEAN) LoggedSetLockPagesPrivilege( GetCurrentProcess(), TRUE );
+    BOOL bResult;
+    bResult = LoggedSetLockPagesPrivilege( GetCurrentProcess(), TRUE );
     return bResult;
 }
 
@@ -148,7 +150,7 @@ initVABlock(ULONG_PTR numPages)
 
     #ifdef MULTIPLE_MAPPINGS
 
-    MEM_EXTENDED_PARAMETER extendedParameters;
+    MEM_EXTENDED_PARAMETER extendedParameters = {0};
     extendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
     extendedParameters.Handle = physicalPageHandle;
 
@@ -161,6 +163,7 @@ initVABlock(ULONG_PTR numPages)
     #endif
 
     if (leafVABlock == NULL) {
+        PRINT_ERROR("[initVABlock] unable to initialize VA block\n");
         exit(-1);
     }
 
@@ -207,8 +210,20 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
         // increment committed page count
         totalCommittedPages++; 
 
+
+        //
+        // note: no lock needed functionally (simply to satisfy assert in enqueuePage)
+        //
+
+        acquireJLock(&newPFN->lockBits);
+
+        //
         // add page to free list
-        enqueuePage(&freeListHead, newPFN);     // TODO - although no lock is needed functionally, adjust if an assert is added into enqueue    
+        //
+
+        enqueuePage(&freeListHead, newPFN);
+
+        releaseJLock(&newPFN->lockBits);
 
     }
 
@@ -245,7 +260,7 @@ initPageFile(ULONG_PTR diskSize)
         exit(-1);
     }
 
-    //TODO - reserves extra spot
+    //TODO - reserves extra spot for page trade?
     totalCommittedPages++;
 
 }
@@ -255,7 +270,7 @@ ULONG_PTR
 allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs) {
 
     // secure privilege for the code
-    BOOLEAN privResult;
+    BOOL privResult;
     privResult = getPrivilege();
     if (privResult != TRUE) {
         PRINT_ERROR("could not get privilege successfully \n");
@@ -270,7 +285,8 @@ allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs) {
 
     #ifdef MULTIPLE_MAPPINGS
 
-    MEM_EXTENDED_PARAMETER extendedParameters;
+    MEM_EXTENDED_PARAMETER extendedParameters = {0};
+
 
     extendedParameters.Type = MemSectionExtendedParameterUserPhysicalFlags;
     extendedParameters.ULong64 = 0;
@@ -512,6 +528,24 @@ freePageTestThread(HANDLE terminationHandle)
 }
 
 
+VOID
+releaseAwaitingFreePFN(PPFNdata PFNtoFree)
+{
+
+    ASSERT(PFNtoFree->pageFileOffset != INVALID_PAGEFILE_INDEX);
+        
+    clearPFBitIndex(PFNtoFree->pageFileOffset);
+
+    PFNtoFree->pageFileOffset = INVALID_PAGEFILE_INDEX;
+
+    // enqueue Page to free list
+    enqueuePage(&freeListHead, PFNtoFree);
+
+    PRINT("[releaseAwaitingFreePFN] VA decommitted during PF write\n");
+
+}
+
+
 BOOLEAN
 modifiedPageWriter()
 {
@@ -559,19 +593,10 @@ modifiedPageWriter()
     // check if PFN has been decommitted
     if (PFNtoWrite->statusBits == AWAITING_FREE) {
         
-        ASSERT(FALSE);          // TEMP TODO : check this (someone has decommitted in meantime). delete after fixed
-        ASSERT(PFNtoWrite->pageFileOffset != INVALID_PAGEFILE_INDEX);
-            
-        clearPFBitIndex(PFNtoWrite->pageFileOffset);
-
-        PFNtoWrite->pageFileOffset = INVALID_PAGEFILE_INDEX;
-
-        // enqueue Page to free list
-        enqueuePage(&freeListHead, PFNtoWrite);
+        releaseAwaitingFreePFN(PFNtoWrite);
 
         releaseJLock(&PFNtoWrite->lockBits);
 
-        PRINT("[modifiedPageWriter] VA decommitted during PF write\n");
         return TRUE;
     }
 
@@ -716,7 +741,7 @@ initListHead(PlistData headData)
     headData->count = 0;
 
     HANDLE pagesCreatedHandle;
-    pagesCreatedHandle =  CreateEvent(NULL, FALSE, FALSE, NULL);
+    pagesCreatedHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
 
     if (pagesCreatedHandle == INVALID_HANDLE_VALUE) {
         PRINT_ERROR("failed to create event handle\n");
@@ -742,41 +767,32 @@ initListHeads(PlistData listHeadArray)
 VOID
 initVAList(PlistData VAListHead, ULONG_PTR numVAs)
 {
+
     if (numVAs < 1) {
         PRINT_ERROR("[initVAList] Cannot initialize list of VAs with length 0\n");
         exit (-1);
     }
 
-    // initialize lock field
-    InitializeCriticalSection(&(VAListHead->lock));
 
-    // initialize head
-    initLinkHead(&(VAListHead->head));
+    initListHead(VAListHead);
 
-    VAListHead->count = 0;
-
-    HANDLE newVAsHandle;
-    newVAsHandle =  CreateEvent(NULL, FALSE, FALSE, NULL);
-
-    if (newVAsHandle == INVALID_HANDLE_VALUE) {
-        PRINT_ERROR("[initVAList] failed to create event handle\n");
-        exit(-1);
-    }
-
-    VAListHead->newPagesEvent = newVAsHandle;
-
-
-    // alloc for VAs
+    //
+    // Call VirtualAlloc for VAs
+    //
     void* baseVA;
 
     #ifdef MULTIPLE_MAPPINGS
-    MEM_EXTENDED_PARAMETER ExtendedParameters;
-    ExtendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
-    ExtendedParameters.Handle = physicalPageHandle;
 
-    baseVA = VirtualAlloc2(NULL, NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &ExtendedParameters, 1);      // equiv to numVAs*PAGE_SIZE
+    MEM_EXTENDED_PARAMETER extendedParameters = {0};
+
+    
+    extendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
+    extendedParameters.Handle = physicalPageHandle;
+
+    baseVA = VirtualAlloc2(NULL, NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &extendedParameters, 1);      // equiv to numVAs*PAGE_SIZE
 
     #else
+
     baseVA = VirtualAlloc(NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);      // equiv to numVAs*PAGE_SIZE
 
     #endif
@@ -806,6 +822,47 @@ initVAList(PlistData VAListHead, ULONG_PTR numVAs)
     }
     
 }
+
+
+VOID
+initEventList(PlistData eventListHead, ULONG_PTR numEvents)
+{
+
+    PHANDLE eventHandles;
+    PeventNode baseNode;
+    PeventNode currNode;
+
+    if (numEvents < 1) {
+        PRINT_ERROR("[initEventList] cannot initialize list of Events with length < 1\n");
+        exit (-1);
+    }
+    
+    initListHead(eventListHead);
+
+
+    eventHandles = VirtualAlloc(NULL, numEvents * sizeof(HANDLE), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+
+    baseNode = VirtualAlloc(NULL, numEvents * sizeof(eventNode), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+     
+    for (int i = 0; i < numEvents; i++) {
+
+        currNode = baseNode + i;
+
+        eventHandles[i] = CreateEvent(NULL, TRUE, FALSE, NULL);
+
+        if (eventHandles[i] == INVALID_HANDLE_VALUE) {
+            PRINT_ERROR("failed to create event handle\n")
+            exit(-1);
+        }
+
+        currNode->event = eventHandles[i];
+
+        enqueueEvent(eventListHead, currNode);
+
+    }
+
+}
+
 
 VOID
 initVADList()
@@ -978,7 +1035,7 @@ testRoutine(ULONG_PTR numPagesReturned)
         #ifdef CHECK_PAGEFILE
         // "leaks" pages in order to force standby->pf repurposing
         for (int j = 0; j < 3; j++) {
-            getPage();
+            getPage(FALSE);
         }
         #endif
 
@@ -1061,6 +1118,8 @@ initializeVirtualMemory()
     initVAList(&writeVAListHead, NUM_ZERO_THREADS + 3);
 
     initVAList(&readPFVAListHead, NUM_ZERO_THREADS + 3);
+
+    initEventList(&readInProgEventListHead, 4);
 
 
     /******************* initialize data structures ****************/

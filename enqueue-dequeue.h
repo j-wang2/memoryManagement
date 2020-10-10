@@ -150,4 +150,14 @@ dequeueLockedVA(PlistData listHead);
 VOID
 enqueueVA(PlistData listHead, PVANode VANode);
 
+
+PeventNode
+dequeueEvent(PlistData listHead);
+
+PeventNode
+dequeueLockedEvent(PlistData listHead);
+
+VOID
+enqueueEvent(PlistData listHead, PeventNode eventNode);
+
 #endif

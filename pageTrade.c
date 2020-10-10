@@ -110,7 +110,11 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     dequeueSpecificPage(pageToTrade);
 
     PPFNdata newPage;
-    newPage = getPage();          // TODO - need to be able to specify preference for freed page, rather than zeroed in params to getpage
+    newPage = getFreePage(FALSE);
+
+    if (newPage == NULL) {
+        newPage = getPageAlways(FALSE);
+    }
 
     ULONG_PTR newPFN;
     newPFN = newPage - PFNarray;
@@ -186,7 +190,7 @@ tradeVA(PVOID virtualAddress)
     if (snapPTE.u1.hPTE.validBit == 1) {
 
         BOOLEAN tResult;
-        tResult = trimVA(virtualAddress);         // TODO: possible multithreading issues
+        tResult = trimVA(virtualAddress);
 
         if (tResult == FALSE) {
             PRINT_ERROR("[pageTrade] unable to trimVA at VA %llu\n", (ULONG_PTR) virtualAddress);

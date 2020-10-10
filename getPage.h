@@ -11,7 +11,7 @@
  *  - NULL on failure (zero list empty)
  */
 PPFNdata
-getZeroPage();
+getZeroPage(BOOLEAN returnLocked);
 
 
 /*
@@ -24,7 +24,7 @@ getZeroPage();
  *  - NULL on failure (free list empty)
  */
 PPFNdata 
-getFreePage();
+getFreePage(BOOLEAN returnLocked);
 
 
 /*
@@ -38,7 +38,7 @@ getFreePage();
  *  - NULL on failure (standby list empty)
  */
 PPFNdata 
-getStandbyPage();
+getStandbyPage(BOOLEAN returnLocked);
 
 
 /*
@@ -49,7 +49,11 @@ getStandbyPage();
  *  - NULL on failure (all lists empty)
  */
 PPFNdata
-getPage();
+getPage(BOOLEAN returnLocked);
+
+
+PPFNdata
+getPageAlways(BOOLEAN returnLocked);
 
 
 #endif

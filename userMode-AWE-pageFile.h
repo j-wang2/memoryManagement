@@ -33,7 +33,6 @@
 #define VM_MULTIPLIER 10                          // VM space is this many times larger than num physical pages successfully allocated
 
 
-
 /********** PTE bit macros *************/
 #define PERMISSIONS_BITS 3                          // bits in non-valid PTE formats reserved for permissions
 #define PTE_INDEX_BITS 9                            // log2(NUM_PAGES)
@@ -75,7 +74,6 @@ typedef struct _transitionPTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for tPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 1 for dzPTE
     ULONG64 permissions: PERMISSIONS_BITS;                    // read if 0, write if 1
-    ULONG64 readInProgressBit: 1;
     ULONG64 PFN: PFN_BITS;
 } transitionPTE, *PtransitionPTE;
 
@@ -111,9 +109,11 @@ typedef struct _PFNdata {
     ULONG64 pageFileOffset: PAGEFILE_BITS;
     ULONG64 PTEindex: PTE_INDEX_BITS;
     ULONG64 writeInProgressBit: 1;          // also used to signify to page trader that page could be being zeroed
+    ULONG64 readInProgressBit: 1;
     ULONG64 refCount: 16;
     ULONG64 remodifiedBit: 1;        
     volatile LONG lockBits;                // 31 free bits if necessary
+    PHANDLE readInProgEvent;
 } PFNdata, *PPFNdata;
 
 typedef struct _listData {
@@ -127,6 +127,12 @@ typedef struct _VANode {
     LIST_ENTRY links;
     PVOID VA;
 } VANode, *PVANode;
+
+typedef struct _eventNode {
+    LIST_ENTRY links;
+    HANDLE event;
+    volatile LONG refCount;
+} eventNode, *PeventNode;
 
 
 
@@ -207,6 +213,8 @@ extern listData readPFVAListHead;
 
 extern listData VADListHead;               // list of VADs
 
+extern listData readInProgEventListHead;
+
 extern CRITICAL_SECTION PTELock;            // coarse-grained lock on page table/directory
 
 
@@ -245,7 +253,7 @@ LoggedSetLockPagesPrivilege ( HANDLE hProcess,
  *  - TRUE on success
  *  - FALSE on failure
  */
-BOOLEAN
+BOOL
 getPrivilege ();
 
 
@@ -287,6 +295,10 @@ zeroPageWriter();
 
 DWORD WINAPI
 zeroPageThread();
+
+VOID
+releaseAwaitingFreePFN(PPFNdata PFNtoFree);
+
 
 /* 
  * modifiedPageWriter: function to pull a page off modified list and write to pagefile

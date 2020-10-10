@@ -1,12 +1,7 @@
-
-
 #include <stdio.h>
 #include <windows.h>
-
-
-#define NUM_LOOPS 1000000000
-
 #include "jlock.h"
+#include "userMode-AWE-pageFile.h"
 
 VOID
 acquireJLock(volatile PLONG lock)
@@ -35,4 +30,17 @@ tryAcquireJLock(volatile PLONG lock)
     else {
         return FALSE;
     }
+}
+
+VOID
+acquirePTELock(PPTE currPTE) {
+
+    EnterCriticalSection(&PTELock);
+}
+
+VOID
+releasePTELock(PPTE currPTE) {
+
+    LeaveCriticalSection(&PTELock);
+
 }

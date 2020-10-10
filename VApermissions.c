@@ -14,7 +14,9 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
     faultStatus PFstatus;
     PFstatus = SUCCESS;
 
+    // while (PFstatus == SUCCESS || PFstatus == PAGE_STATE_CHANGE) {
     while (PFstatus == SUCCESS) {
+
 
     #ifdef TEMP_TESTING
 
@@ -37,7 +39,9 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
 
 
             if (snapPTE.u1.ulongPTE == currPTE->u1.ulongPTE) {
+
                 PTEpermissions tempRWEpermissions = getPTEpermissions(snapPTE);
+
                 if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {
 
                     releaseJLock(&currPFN->lockBits);
@@ -49,15 +53,20 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
 
                 releaseJLock(&currPFN->lockBits);
                 return SUCCESS;
+
             }
             else {
+
                 releaseJLock(&currPFN->lockBits);
 
                 continue;
+                
             }
 
         } else {
+
             PFstatus = pageFault(virtualAddress, RWEpermissions);
+
         }
 
 
@@ -85,7 +94,9 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
             PFstatus = pageFault(virtualAddress, RWEpermissions);
 
         }
-#endif
+
+    #endif
+
     }
 
     return PFstatus;
@@ -196,6 +207,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 BOOLEAN
 trimVA(void* virtualAddress)
 {
+
     PRINT("[trimVA] trimming page with VA %llu\n", (ULONG_PTR) virtualAddress);
 
     PPTE PTEaddress;
@@ -208,12 +220,19 @@ trimVA(void* virtualAddress)
     
     // take snapshot of old PTE
     PTE oldPTE;
+
+    // acquire PTE lock
+    acquirePTELock(PTEaddress);
+
     oldPTE = *PTEaddress;
 
     // check if PTE's valid bit is set - if not, can't be trimmed and return failure
     if (oldPTE.u1.hPTE.validBit == 0) {
+
+        releasePTELock(PTEaddress);
         PRINT("could not trim VA %llu - PTE is not valid\n", (ULONG_PTR) virtualAddress);
         return FALSE;
+
     }
 
     // get pageNum
@@ -224,17 +243,6 @@ trimVA(void* virtualAddress)
     PPFNdata PFNtoTrim;
     PFNtoTrim = PFNarray + pageNum;
 
-    // acquire lock
-    acquireJLock(&PFNtoTrim->lockBits);
-
-
-    // if PTE has changed, return false
-    if (oldPTE.u1.ulongPTE != PTEaddress->u1.ulongPTE) {
-        releaseJLock(&PFNtoTrim->lockBits);
-        PRINT("[trimVA] PTE has been changed\n");
-        return FALSE;
-    }
-
 
     ASSERT(PFNtoTrim->statusBits == ACTIVE);
 
@@ -244,11 +252,13 @@ trimVA(void* virtualAddress)
     PTEtoTrim.u1.ulongPTE = 0;
 
 
-    // TODO - need to lock PTE from here until the update of the PTE
-    EnterCriticalSection(&PTELock);
-
     // unmap page from VA (invalidates hardwarePTE)
     MapUserPhysicalPages(virtualAddress, 1, NULL);
+
+
+    // acquire page lock (prior to viewing/editing PFN fields)
+    acquireJLock(&PFNtoTrim->lockBits);
+
 
     // if write in progress bit is set, modified writer re-enqueues page
     if (PFNtoTrim->writeInProgressBit == 1) {
@@ -268,6 +278,7 @@ trimVA(void* virtualAddress)
 
     }
     else {
+
         // check dirtyBit to see if page has been modified
         if (oldPTE.u1.hPTE.dirtyBit == 0) {
 
@@ -283,6 +294,8 @@ trimVA(void* virtualAddress)
         }
     }
 
+    releaseJLock(&PFNtoTrim->lockBits);
+
 
     // set transitionBit to 1
     PTEtoTrim.u1.tPTE.transitionBit = 1;  
@@ -291,11 +304,9 @@ trimVA(void* virtualAddress)
     PTEtoTrim.u1.tPTE.permissions = getPTEpermissions(oldPTE);
 
     * (volatile PTE *) PTEaddress = PTEtoTrim;
-    
-    LeaveCriticalSection(&PTELock);  //todo-fix
-    
 
-    releaseJLock(&PFNtoTrim->lockBits);
+    releasePTELock(PTEaddress);
+
 
     return TRUE;
 
@@ -501,9 +512,11 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
             }
             
-            // only dequeue if write in progress bit is zero
+            //
+            // only dequeue if both read in progress and write in progress bits are zero
+            //
 
-            if (currPFN->writeInProgressBit == 1) {
+            if (currPFN->writeInProgressBit == 1 || currPFN->readInProgressBit == 1) {
 
                 currPFN->statusBits = AWAITING_FREE;
 

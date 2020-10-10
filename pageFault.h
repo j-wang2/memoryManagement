@@ -8,12 +8,13 @@
  * pageFault: function to simulate and handle a pagefault
  * function
  *  - gets page given a VA
- *  - if PTE exists, return SUCCESS (2)?
+ *  - if PTE exists, return SUCCESS
  *  - otherweise, dequeue from freed list and return pointer to PFN entry 
  * 
  * Returns faultStatus:
  *  - SUCCESS on successful 
  *  - ACCESS_VIOLATION on access violation ( out of bounds/ invalid permissions)
+ *  - 
  * 
  */
 faultStatus

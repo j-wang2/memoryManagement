@@ -182,7 +182,6 @@ readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex) {
 
     }
 
-    // TODO: function into file systemva
 
     // get PFsourceVA from the pageFileIndex
     PVOID PFsourceVA;
