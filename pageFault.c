@@ -481,7 +481,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     
     SetEvent(freedPFN->readInProgEvent);
 
-    if (InterlockedDecrement(readInProgEventNode->refCount) == 0){
+    if (InterlockedDecrement(&readInProgEventNode->refCount) == 0){
 
         freedPFN->readInProgEvent = NULL;
 
