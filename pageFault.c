@@ -41,10 +41,12 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
         PFN = PFNarray + snapPTE.u1.hPTE.PFN;
 
         acquireJLock(&PFN->lockBits);
-        // if the write in progress bit is clear, immediately free pf location 
+
+        //
+        // If the write in progress bit is clear, immediately free pf location 
         // and pf PFN pointer
-        // if the write in progress bit is set, the bit index and pagefile field
-        // are cleared by the smodified page writer once it finishes writing
+        //
+
         if (PFN->writeInProgressBit == 0) {
 
             // free PF location
@@ -54,6 +56,12 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
             PFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
 
         }
+
+        //
+        // Otherwise, if the write in progress bit is set, the modified writer is 
+        // still writing to the pagefile, and so the bit index and pagefileOffset field
+        // are cleared by the modified page writer once it finishes writing
+        //
 
         releaseJLock(&PFN->lockBits);
 
@@ -112,10 +120,12 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     acquireJLock(&transitionPFN->lockBits);
 
     //
-    // If page has been repurposed, repeat the fault
+    // If page has been repurposed since lock acquisition, repeat the fault
     //
 
     if (snapPTE.u1.ulongPTE != masterPTE->u1.ulongPTE) {
+
+        releaseJLock(&transitionPFN->lockBits);     // todo: check
 
         PRINT("[transPageFault] page has been repurposed from standby list\n");
 
@@ -313,10 +323,13 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     PeventNode readInProgEventNode;
     readInProgEventNode = dequeueLockedEvent(&readInProgEventListHead);
 
-    if (readInProgEventNode == NULL) {
+    while (readInProgEventNode == NULL) {
 
-        PRINT_ERROR("failed to create event handle\n");
-        exit(-1);
+        PRINT_ERROR("failed to get event handle\n");
+
+        WaitForSingleObject(readInProgEventListHead.newPagesEvent, INFINITE);
+
+        readInProgEventNode = dequeueLockedEvent(&readInProgEventListHead);
 
     }
 
@@ -654,8 +667,8 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     if (oldPTE.u1.hPTE.validBit == 1) {                                 // VALID STATE PTE
 
         //
-        // Lock is acquired within validPageFault solely to check write in progress bit
-        // - in the case a of modified write ->faulted back in to valid
+        // PFN lock is acquired within validPageFault solely to check write in progress bit
+        // - in the case of modified write ->faulted back to valid
         //
 
         status = validPageFault(RWEpermissions, oldPTE, currPTE);

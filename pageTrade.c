@@ -44,7 +44,7 @@ tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)
     releaseJLock(&(pageToTrade->lockBits));
 
     // increment commit count, since this page is now out of circulation
-    totalCommittedPages++;
+    InterlockedIncrement(&totalCommittedPages);
 
     return TRUE;
 
@@ -156,7 +156,7 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     releaseJLock(&(pageToTrade->lockBits));
 
     // increment commit count, since this page is now out of circulation (in addition to the one that is just brought in)
-    totalCommittedPages++;
+    InterlockedIncrement(&totalCommittedPages);
 
     return TRUE;
 
@@ -166,7 +166,7 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
 BOOLEAN
 tradeVA(PVOID virtualAddress)
 {
-    // TODO - need to lock totalCommittedPages
+
     if (totalCommittedPages >= totalMemoryPageLimit) {
         PRINT("[tradeVA] no remaining memory\n");
         return FALSE;
@@ -212,7 +212,8 @@ tradeVA(PVOID virtualAddress)
             return FALSE;
         }
 
-        pageFault(virtualAddress, READ_ONLY);           // todo - check ret value
+        // pageFault(virtualAddress, READ_ONLY);           // todo - check ret value
+        accessVA(virtualAddress, READ_ONLY);
 
         if (originalValidBit) {
 

@@ -177,13 +177,25 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
             continue;
         }
 
-        if (totalCommittedPages < totalMemoryPageLimit) {
+        // LONG oldVal;
+        // oldVal = totalCommittedPages;
+        // LONG tempVal;
+        // tempVal = oldVal + 1;
+
+        // while (tempVal != oldVal){
+        //     tempVal = InterlockedCompareExchange(&totalCommittedPages, oldVal + 1, oldVal);
+        // }
+
+        // if ( tempVal < totalMemoryPageLimit) {
+
+        if (InterlockedExchangeAdd(&totalCommittedPages, 1) + 1< totalMemoryPageLimit) {
 
             // commit with priviliges param (commits PTE)
             tempPTE.u1.dzPTE.permissions = RWEpermissions;
 
             tempPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
-            totalCommittedPages++;
+            InterlockedIncrement(&totalCommittedPages);     // TODO -combine with read?
+
 
             PVOID currVA;
             currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
@@ -557,7 +569,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
         // decrement count of committed pages
         if (totalCommittedPages > 0)  {
 
-            totalCommittedPages--;
+            InterlockedDecrement(&totalCommittedPages);
 
         } else {
 

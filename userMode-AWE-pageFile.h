@@ -185,7 +185,7 @@ extern PPTE PTEarray;                      // starting address of page table
 extern void* pageTradeDestVA;              // specific VA used for page trading destination
 extern void* pageTradeSourceVA;            // specific VA used for page trading source
 
-extern ULONG_PTR totalCommittedPages;      // count of committed pages (initialized to zero)
+extern LONG totalCommittedPages;      // count of committed pages (initialized to zero)
 extern ULONG_PTR totalMemoryPageLimit;     // limit of committed pages (memory block + pagefile space)
 
 

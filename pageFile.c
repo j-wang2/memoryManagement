@@ -78,9 +78,14 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
     PVANode writeVANode;
     writeVANode = dequeueLockedVA(&writeVAListHead);
 
-    if (writeVANode == NULL) {
-        PRINT("[modifiedPageWriter] TODO: waiting for release\n");
-        DebugBreak();
+    while (writeVANode == NULL) {
+
+        PRINT("[modifiedPageWriter] waiting for release\n");
+
+        WaitForSingleObject(writeVAListHead.newPagesEvent, INFINITE);
+
+        writeVANode = dequeueLockedVA(&writeVAListHead);
+
     }
 
     PVOID modifiedWriteVA;
@@ -162,10 +167,13 @@ readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex) {
     PVANode readPFVANode;
     readPFVANode = dequeueLockedVA(&readPFVAListHead);
 
-    if (readPFVANode == NULL) {
+    while (readPFVANode == NULL) {
 
         PRINT("[pageFilePageFault] TODO: waiting for release\n");
-        DebugBreak();
+
+        WaitForSingleObject(readPFVAListHead.newPagesEvent, INFINITE);
+
+        readPFVANode = dequeueLockedVA(&readPFVAListHead);
 
     }
 

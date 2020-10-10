@@ -212,7 +212,7 @@ getPage(BOOLEAN returnLocked)
     }
 
 
-    PRINT_ERROR("All lists empty - unable to get page\n");      // TODO - needs to be handled to avoid deadlock
+    PRINT_ALWAYS("[getPage] All lists empty - unable to get page\n");
     
     return returnPFN;                                           // should be NULL
 
@@ -223,23 +223,28 @@ PPFNdata
 getPageAlways(BOOLEAN returnLocked) 
 {
     PPFNdata freedPFN;
+
     while (TRUE) {
 
         // dequeue and return a LOCKED page (PFN lock must be released)
         freedPFN = getPage(returnLocked);
 
         if (freedPFN == NULL) {
-            // PRINT_ERROR("[pageFilePageFault] failed to successfully acquire PFN in getPage\n");
 
-            HANDLE pageEventHandles[] = {&zeroListHead.newPagesEvent, &freeListHead.newPagesEvent, &standbyListHead.newPagesEvent};
+            HANDLE pageEventHandles[] = {zeroListHead.newPagesEvent, freeListHead.newPagesEvent, standbyListHead.newPagesEvent};
 
+            WaitForMultipleObjects(STANDBY + 1, pageEventHandles, TRUE, INFINITE);
 
-            WaitForMultipleObjects(3, pageEventHandles, TRUE, INFINITE);
-
-            // return NO_FREE_PAGES;
             continue;
+
         } else {
+
+            //
+            // PFN is valid: break out of while-loop and return
+            //
+
             break;
+
         }
     }
     return freedPFN;

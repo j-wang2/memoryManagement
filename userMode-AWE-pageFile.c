@@ -18,42 +18,40 @@
 /******************************************************
  *********************** GLOBALS **********************
  *****************************************************/
-void* leafVABlock;                  // starting address of virtual memory block
-void* leafVABlockEnd;               // ending address of virtual memory block
+void* leafVABlock;                      // starting address of virtual memory block
+void* leafVABlockEnd;                   // ending address of virtual memory block
 
-PPFNdata PFNarray;                  // starting address of PFN metadata array
-PPTE PTEarray;                      // starting address of page table
+PPFNdata PFNarray;                      // starting address of PFN metadata array
+PPTE PTEarray;                          // starting address of page table
 
 void* pageTradeDestVA;                  // specific VA used for page trading destination
 void* pageTradeSourceVA;                // specific VA used for page trading source
 
-ULONG_PTR totalCommittedPages;      // count of committed pages (initialized to zero)
+LONG totalCommittedPages;               // count of committed pages (initialized to zero)
 ULONG_PTR totalMemoryPageLimit = NUM_PAGES + (PAGEFILE_SIZE >> PAGE_SHIFT);    // limit of committed pages (memory block + pagefile space)
 
-void* pageFileVABlock;              // starting address of pagefile "disk" (memory)
+void* pageFileVABlock;                  // starting address of pagefile "disk" (memory)
 ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 
 // Execute-Write-Read (bit ordering)
 ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask | executeMask), (readMask | writeMask | executeMask) };
 
 /************ List declarations *****************/
-listData listHeads[ACTIVE];         // page listHeads array
+listData listHeads[ACTIVE];             // page listHeads array
 
-listData zeroVAListHead;            // listHead of zeroVAs used for zeroing PFNs (via AWE mapping)
-listData writeVAListHead;           // listHead of writeVAs used for writing to page file
-listData readPFVAListHead;
+listData zeroVAListHead;                // listHead of zeroVAs used for zeroing PFNs (via AWE mapping)
+listData writeVAListHead;               // listHead of writeVAs used for writing to page file
+listData readPFVAListHead;              // listHead of pagefile read VAs used for reading from pagefile
 
-listData VADListHead;               // list of VADs
+listData VADListHead;                   // list of VADs
 
 listData readInProgEventListHead;
 
-
 CRITICAL_SECTION PTELock;
 
-HANDLE physicalPageHandle;          // for shared pages
+HANDLE physicalPageHandle;              // for multi-mapped pages (to support multithreading)
 
-
-BOOLEAN debugMode;
+BOOLEAN debugMode;                      // toggled by -v flag on cmd line
 
 
 
@@ -207,9 +205,11 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
             exit(-1);
         }
 
-        // increment committed page count
-        totalCommittedPages++; 
+        //
+        // Atomically increment committed page count
+        //
 
+        InterlockedIncrement(&totalCommittedPages);
 
         //
         // note: no lock needed functionally (simply to satisfy assert in enqueuePage)
@@ -261,7 +261,7 @@ initPageFile(ULONG_PTR diskSize)
     }
 
     //TODO - reserves extra spot for page trade?
-    totalCommittedPages++;
+    InterlockedIncrement(&totalCommittedPages);
 
 }
 
@@ -338,9 +338,14 @@ zeroPage(ULONG_PTR PFN)
     PVANode zeroVANode;
     zeroVANode = dequeueLockedVA(&zeroVAListHead);
 
-    if (zeroVANode == NULL) {
+    while (zeroVANode == NULL) {
+        
         PRINT("[zeroPage] TODO: waiting for release\n");
-        DebugBreak();
+
+        WaitForSingleObject(zeroVAListHead.newPagesEvent, INFINITE);
+
+        zeroVANode = dequeueLockedVA(&zeroVAListHead);
+
     }
 
     PVOID zeroVA;
@@ -366,6 +371,7 @@ zeroPage(ULONG_PTR PFN)
     enqueueVA(&zeroVAListHead, zeroVANode);
 
     return TRUE;
+
 }
 
 
@@ -867,13 +873,13 @@ initEventList(PlistData eventListHead, ULONG_PTR numEvents)
 VOID
 initVADList()
 {
+
     InitializeCriticalSection(&(VADListHead.lock));
 
     initLinkHead(&(VADListHead.head));
 
     VADListHead.count = 0;
 
-    // do i need to do an event here?
 }
 
 
@@ -897,19 +903,23 @@ testRoutine(ULONG_PTR numPagesReturned)
     PRINT_ALWAYS("Committing and then faulting in %llu pages\n", testNum);
 
 
-    commitVA(testVA, READ_ONLY, testNum << PAGE_SHIFT);    // commits with READ_ONLY permissions
+    commitVA(testVA, READ_ONLY, testNum << PAGE_SHIFT);     // commits with READ_ONLY permissions
+    protectVA(testVA, READ_WRITE, testNum << PAGE_SHIFT);   // converts to read write
 
 
     for (int i = 0; i < testNum; i++) {
 
         faultStatus testStatus;
 
-        // commitVA(testVA, READ_ONLY, PAGE_SIZE);    // commits with READ_ONLY permissions
-        protectVA(testVA, READ_WRITE, PAGE_SIZE);   // converts to read write
+        //
+        // Write->Trim->Access
+        //
 
         testStatus = writeVA(testVA, testVA);
-            
-        // trimVA(testVA);
+
+        trimVA(testVA);
+
+        testStatus = accessVA(testVA, READ_ONLY);
 
         /************ TRADING pages ***********/
 
@@ -1039,7 +1049,7 @@ testRoutine(ULONG_PTR numPagesReturned)
         }
         #endif
 
-        faultStatus testStatus = pageFault(testVA, READ_WRITE);        // to TEST VAs
+        faultStatus testStatus = accessVA(testVA, READ_WRITE);        // to TEST VAs
         // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
