@@ -188,7 +188,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
         // if ( tempVal < totalMemoryPageLimit) {
 
-        if (InterlockedExchangeAdd(&totalCommittedPages, 1) + 1< totalMemoryPageLimit) {
+        if (InterlockedExchangeAdd(&totalCommittedPages, 1) + 1 < totalMemoryPageLimit) {
 
             // commit with priviliges param (commits PTE)
             tempPTE.u1.dzPTE.permissions = RWEpermissions;
@@ -204,7 +204,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         
         } else {
             // no remaining pages
-            PRINT("[commitVA] no remaining pages - unable to commit PTE\n");
+            PRINT("[commitVA] All commit charge used (no remaining pages) - unable to commit PTE\n");
             return FALSE;
         }
 

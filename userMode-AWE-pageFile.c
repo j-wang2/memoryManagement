@@ -831,10 +831,57 @@ initVAList(PlistData VAListHead, ULONG_PTR numVAs)
 
 
 VOID
+freeVAList(PlistData VAListHead)
+{
+
+    PVANode currNode;
+    PLIST_ENTRY currLinks;
+    PLIST_ENTRY nextLinks;
+    PVANode baseNode;
+
+    baseNode = NULL;
+    currLinks = VAListHead->head.Flink;
+
+    //
+    // Iterate through nodes to find the original base address
+    //
+
+    while (currLinks != &VAListHead->head) {
+    
+        currNode = CONTAINING_RECORD(currLinks, VANode, links);
+
+        // VirtualFree(currNode->VA, 0, MEM_RELEASE);
+
+        if (baseNode == NULL || (PVOID) currNode < (PVOID) baseNode) {
+
+            baseNode = currNode;
+            
+        }
+
+        nextLinks = currNode->links.Flink;
+
+        currLinks = nextLinks;
+
+    }
+
+    //
+    // Free VA's from the nodes
+    //
+
+    VirtualFree(baseNode->VA, 0, MEM_RELEASE);
+
+    //
+    // Free nodes from the original base address
+    //
+
+    VirtualFree(baseNode, 0, MEM_RELEASE);
+
+}
+
+VOID
 initEventList(PlistData eventListHead, ULONG_PTR numEvents)
 {
 
-    PHANDLE eventHandles;
     PeventNode baseNode;
     PeventNode currNode;
 
@@ -845,27 +892,69 @@ initEventList(PlistData eventListHead, ULONG_PTR numEvents)
     
     initListHead(eventListHead);
 
-
-    eventHandles = VirtualAlloc(NULL, numEvents * sizeof(HANDLE), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-
     baseNode = VirtualAlloc(NULL, numEvents * sizeof(eventNode), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-     
+
+    if (baseNode == NULL) {
+        PRINT_ERROR("failed to alloc for baseNode handle\n")
+        exit(-1);
+    }
+    
     for (int i = 0; i < numEvents; i++) {
 
         currNode = baseNode + i;
 
-        eventHandles[i] = CreateEvent(NULL, TRUE, FALSE, NULL);
+        currNode->event = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-        if (eventHandles[i] == INVALID_HANDLE_VALUE) {
+        if (currNode->event == INVALID_HANDLE_VALUE) {
             PRINT_ERROR("failed to create event handle\n")
-            exit(-1);
         }
-
-        currNode->event = eventHandles[i];
 
         enqueueEvent(eventListHead, currNode);
 
     }
+
+}
+
+
+VOID
+freeEventList(PlistData eventListHead)
+{
+
+    PeventNode currNode;
+    PLIST_ENTRY currLinks;
+    PLIST_ENTRY nextLinks;
+    PVOID baseAddress;
+
+    baseAddress = NULL;
+    currLinks = eventListHead->head.Flink;
+
+    //
+    // Iterate through nodes to find the original base address
+    //
+
+    while (currLinks != &eventListHead->head) {
+    
+        currNode = CONTAINING_RECORD(currLinks, eventNode, links);
+
+        CloseHandle(currNode->event);
+
+        if (baseAddress == NULL || (PVOID) currNode < baseAddress) {
+
+            baseAddress = (PVOID) currNode;
+
+        }
+
+        nextLinks = currNode->links.Flink;
+
+        currLinks = nextLinks;
+
+    }
+
+    //
+    // Free from the original base address
+    //
+
+    VirtualFree(baseAddress, 0, MEM_RELEASE);
 
 }
 
@@ -1096,6 +1185,7 @@ testRoutine(ULONG_PTR numPagesReturned)
 ULONG_PTR
 initializeVirtualMemory()
 {
+
     // initialize zero/free/standby lists 
     initListHeads(listHeads);
 
@@ -1140,6 +1230,9 @@ initializeVirtualMemory()
     // create local PFN metadata array
     initPFNarray(aPFNs, numPagesReturned);
 
+    // Free PFN array (no longer used)
+    VirtualFree(aPFNs, 0, MEM_RELEASE);
+
     // create local PTE array to map VAs to pages
     initPTEarray(virtualMemPages);
 
@@ -1147,6 +1240,7 @@ initializeVirtualMemory()
     initPageFile(PAGEFILE_SIZE);
 
     return numPagesReturned;
+
 }
 
 
@@ -1168,12 +1262,24 @@ main(int argc, char** argv)
     testRoutine(numPagesReturned);
 
 
-    PRINT_ALWAYS("----------------\nprogram complete\n----------------");
-
-    //  free memory allocated
+    /******************* free allocated memory ***************/
     VirtualFree(leafVABlock, 0, MEM_RELEASE);
     VirtualFree(PFNarray, 0, MEM_RELEASE);
     VirtualFree(PTEarray, 0, MEM_RELEASE);
     VirtualFree(pageFileVABlock, 0, MEM_RELEASE);
 
+    VirtualFree(pageTradeDestVA, 0, MEM_RELEASE);
+    VirtualFree(pageTradeSourceVA, 0, MEM_RELEASE);
+
+    freeEventList(&readInProgEventListHead);
+
+    freeVAList(&zeroVAListHead);
+    freeVAList(&writeVAListHead);
+    freeVAList(&readPFVAListHead);
+
+    PRINT_ALWAYS("----------------\nprogram complete\n----------------");
+
+
 }
+
+
