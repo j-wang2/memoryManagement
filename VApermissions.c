@@ -147,22 +147,26 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 {
 
     PPTE startPTE;
+    PVOID endVA;
+    PPTE endPTE;
+    PPTE currPTE;
+
     startPTE = getPTE(startVA);
 
     // inclusive (use <= as condition)
-    PVOID endVA;
     endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
 
-    PPTE endPTE;
     endPTE = getPTE(endVA);
-    
-    PPTE currPTE;
+
+    acquirePTELock(startPTE);
 
     for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
         // invalid VA (not in range)
         if (currPTE == NULL) {
-            PRINT_ERROR("[commitVA] Invalid PTE address - fatal error\n")
+
+            releasePTELock(startPTE);
+            PRINT_ERROR("[commitVA] Invalid PTE address - fatal error\n");
             return FALSE;
         }
         
@@ -173,44 +177,74 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
         if (tempPTE.u1.hPTE.validBit == 1 || tempPTE.u1.tPTE.transitionBit == 1 || tempPTE.u1.pfPTE.permissions != NO_ACCESS) {
             PRINT("[commitVA] PTE is already valid, transition, or demand zero\n");
-            // return FALSE;
             continue;
         }
 
-        // LONG oldVal;
-        // oldVal = totalCommittedPages;
-        // LONG tempVal;
-        // tempVal = oldVal + 1;
 
-        // while (tempVal != oldVal){
-        //     tempVal = InterlockedCompareExchange(&totalCommittedPages, oldVal + 1, oldVal);
-        // }
+        //
+        // Below code to syncrhonize the increment of totalCommittedPages
+        //
 
-        // if ( tempVal < totalMemoryPageLimit) {
+        LONG oldVal;
+        LONG tempVal;
 
-        if (InterlockedExchangeAdd(&totalCommittedPages, 1) + 1 < totalMemoryPageLimit) {
+        oldVal = totalCommittedPages;
 
-            // commit with priviliges param (commits PTE)
-            tempPTE.u1.dzPTE.permissions = RWEpermissions;
+        while (TRUE) {
 
-            tempPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
-            InterlockedIncrement(&totalCommittedPages);     // TODO -combine with read?
+            ASSERT( oldVal <= totalMemoryPageLimit);
 
+            if (oldVal == totalMemoryPageLimit) {
 
-            PVOID currVA;
-            currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
-            PRINT("[commitVA] Committed PTE at VA %llx with permissions %d\n", (ULONG_PTR) currVA, RWEpermissions);
+                // no remaining pages
+                releasePTELock(startPTE);
 
-        
-        } else {
-            // no remaining pages
-            PRINT("[commitVA] All commit charge used (no remaining pages) - unable to commit PTE\n");
-            return FALSE;
+                PRINT("[commitVA] All commit charge used (no remaining pages) - unable to commit PTE\n");
+                return FALSE;
+
+            }
+
+            tempVal = InterlockedCompareExchange(&totalCommittedPages, oldVal + 1, oldVal);
+
+            //
+            // Compare exchange successful
+            //
+
+            if (tempVal == oldVal) {
+
+                PVOID currVA;
+
+                //
+                // commit with priviliges param (commits PTE)
+                //
+
+                tempPTE.u1.dzPTE.permissions = RWEpermissions;
+
+                tempPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
+
+                currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
+                PRINT("[commitVA] Committed PTE at VA %llx with permissions %d\n", (ULONG_PTR) currVA, RWEpermissions);
+
+                break;
+
+            } else {
+
+                oldVal = tempVal;
+
+            }
+
         }
+
+        //
+        // Write out newPTE contents indivisibly
+        //
 
         * (volatile PTE *) currPTE = tempPTE;
             
     }
+
+    releasePTELock(startPTE);
+
     return TRUE;
 
 }
@@ -329,22 +363,27 @@ BOOLEAN
 protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize) {
 
     PPTE startPTE;
+    PVOID endVA;
+    PPTE endPTE;
+    PPTE currPTE;
+
     startPTE = getPTE(startVA);
 
     // inclusive (use <= as condition)
-    PVOID endVA;
     endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
 
-    PPTE endPTE;
     endPTE = getPTE(endVA);
     
-    PPTE currPTE;
+    acquirePTELock(startPTE);
 
     for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
         // invalid VA (not in range)
         if (currPTE == NULL) {
+            releasePTELock(startPTE);
+
             PRINT_ERROR("[protectVA] Invalid PTE address - fatal error\n")
+
             return FALSE;
         }
         
@@ -388,6 +427,7 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
         * (volatile PTE *) currPTE = tempPTE;
                 
     }
+    releasePTELock(startPTE);
 
     return TRUE;
 
@@ -399,24 +439,28 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
 
     PPTE startPTE;
-    startPTE = getPTE(startVA);
-
-    // inclusive (use <= as condition)
     PVOID endVA;
-    endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
-
     PPTE endPTE;
-    endPTE = getPTE(endVA);
-    
     PPTE currPTE;
     PVOID currVA;
 
+    startPTE = getPTE(startVA);
+
+    // inclusive (use <= as condition)
+    endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
+
+    endPTE = getPTE(endVA);
+
+    acquirePTELock(startPTE);
 
     for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
 
         if (currPTE == NULL) {
+            releasePTELock(startPTE);
+
             PRINT_ERROR("[decommitVA] Invalid PTE address - fatal error\n")
+
             return FALSE;
         }
 
@@ -562,8 +606,11 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
         }
         else if (tempPTE.u1.ulongPTE == 0) {                            // zero PTE
+            
+            releasePTELock(startPTE);
             PRINT_ERROR("[decommitVA] already decommitted\n");
             return TRUE;
+            
         }
 
         // decrement count of committed pages
@@ -573,6 +620,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
         } else {
 
+            releasePTELock(startPTE);
             PRINT_ERROR("[decommitVA] bookkeeping error - no committed pages\n");
             return FALSE;
 
@@ -583,6 +631,9 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
         * (volatile PTE *) currPTE = tempPTE;
     }
+
+    releasePTELock(startPTE);
+
     return TRUE;
 
 }

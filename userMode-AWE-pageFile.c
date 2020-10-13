@@ -1244,6 +1244,28 @@ initializeVirtualMemory()
 }
 
 
+VOID
+freeVirtualMemory()
+{
+
+    /******************* free allocated memory ***************/
+    VirtualFree(leafVABlock, 0, MEM_RELEASE);
+    VirtualFree(PFNarray, 0, MEM_RELEASE);
+    VirtualFree(PTEarray, 0, MEM_RELEASE);
+    VirtualFree(pageFileVABlock, 0, MEM_RELEASE);
+
+    VirtualFree(pageTradeDestVA, 0, MEM_RELEASE);
+    VirtualFree(pageTradeSourceVA, 0, MEM_RELEASE);
+
+    freeEventList(&readInProgEventListHead);
+
+    freeVAList(&zeroVAListHead);
+    freeVAList(&writeVAListHead);
+    freeVAList(&readPFVAListHead);
+
+}
+
+
 VOID 
 main(int argc, char** argv) 
 {
@@ -1263,19 +1285,7 @@ main(int argc, char** argv)
 
 
     /******************* free allocated memory ***************/
-    VirtualFree(leafVABlock, 0, MEM_RELEASE);
-    VirtualFree(PFNarray, 0, MEM_RELEASE);
-    VirtualFree(PTEarray, 0, MEM_RELEASE);
-    VirtualFree(pageFileVABlock, 0, MEM_RELEASE);
-
-    VirtualFree(pageTradeDestVA, 0, MEM_RELEASE);
-    VirtualFree(pageTradeSourceVA, 0, MEM_RELEASE);
-
-    freeEventList(&readInProgEventListHead);
-
-    freeVAList(&zeroVAListHead);
-    freeVAList(&writeVAListHead);
-    freeVAList(&readPFVAListHead);
+    freeVirtualMemory();
 
     PRINT_ALWAYS("----------------\nprogram complete\n----------------");
 
