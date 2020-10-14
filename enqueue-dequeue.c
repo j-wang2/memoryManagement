@@ -1,5 +1,6 @@
 #include "userMode-AWE-pageFile.h"
 #include "jLock.h"
+#include "enqueue-dequeue.h"
 
 VOID 
 checkAvailablePages(PFNstatus dequeuedStatus)
@@ -43,6 +44,8 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
 {
 
     ASSERT(PFN->lockBits != 0);
+
+    // ASSERT(PFN->writeInProgressBit == 0);
 
     //lock listHead (since listHead values are not changed/accessed until dereferenced)
     EnterCriticalSection(&(listHead->lock));

@@ -107,15 +107,30 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
 faultStatus
 writeVA(PVOID virtualAddress, PVOID str) 
 {
+
     faultStatus PFstatus;
+    PPTE currPTE;
+
+    //
+    // Acquire and hold lock from pre-fault to post-write
+    //
+
+    currPTE = getPTE(virtualAddress);
+    acquirePTELock(currPTE);
+
     PFstatus = accessVA(virtualAddress, READ_WRITE);
 
-    // if accessing VA is successful, write parameter str to the VA
+    //
+    // If VA access is successful, write parameter str to the VA
+    //
+
     if (PFstatus == SUCCESS) {
 
         * (PVOID *) virtualAddress = str;
         
     }
+
+    releasePTELock(currPTE);
 
     return PFstatus;
     
@@ -512,7 +527,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
             }
             #endif
 
-            PRINT_ALWAYS("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+            // PRINT_ALWAYS("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
             // PRINT("decommitting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) currVA, * (PCHAR *) currVA);
 
 
@@ -549,7 +564,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
             // get PFN
             PPFNdata currPFN;
-            currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
+            currPFN = PFNarray + tempPTE.u1.tPTE.PFN;
 
 
             acquireJLock(&currPFN->lockBits);
@@ -610,7 +625,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
             releasePTELock(startPTE);
             PRINT_ERROR("[decommitVA] already decommitted\n");
             return TRUE;
-            
+
         }
 
         // decrement count of committed pages

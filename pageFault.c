@@ -156,7 +156,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         // Since event is manually reset, this thread will not wait on an event that has already been set
         //
 
-        WaitForSingleObject(*transitionPFN->readInProgEvent, INFINITE);
+        WaitForSingleObject(transitionPFN->readInProgEvent, INFINITE);
 
         //
         // If refcount is non-zero, the event can no longer be edited
@@ -281,7 +281,6 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     
     ULONG_PTR pageNum;
     PTE newPTE;                                    
-    HANDLE localReadInProgEvent;
     PTEpermissions pageFileRWEpermissions;
     PPFNdata freedPFN;
     ULONG_PTR PTEindex;
@@ -304,7 +303,11 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     }
 
 
-    freedPFN = getPageAlways(TRUE);
+    //
+    // // TODO - forward progress issue. PTE lock held and getPageAlways waits for an event, need aging/trimming thread
+    //
+
+    freedPFN = getPageAlways(TRUE);         
 
     //
     // Set PFN status bits to standby and read in progress bit to signal to another faulter an IO read is occurring
@@ -333,9 +336,8 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     }
 
-    localReadInProgEvent = readInProgEventNode->event;
+    freedPFN->readInProgEvent = readInProgEventNode->event;
 
-    freedPFN->readInProgEvent = &localReadInProgEvent;
 
     freedPFN->PTEindex = masterPTE - PTEarray;
 
@@ -490,9 +492,10 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // set readInProgressBit to 0 and set event so other threads that have transition faulted on this PTE can proceed
     //
 
+    ASSERT(freedPFN->readInProgressBit == 1);
     freedPFN->readInProgressBit = 0;
     
-    SetEvent(freedPFN->readInProgEvent);
+    SetEvent(freedPFN->readInProgEvent);        // TODO - has caused invalid handle error
 
     if (InterlockedDecrement(&readInProgEventNode->refCount) == 0){
 

@@ -15,7 +15,7 @@
 /*********** temporary testing macros ************/
 // #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
 #define TEMP_TESTING                                // temporary workaround for PF due to 
-#define NUM_ZERO_THREADS 3
+#define NUM_THREADS 5
 #define TESTING_ZERO                                // toggles zero page thread
 #define TESTING_MODIFIED                            // toggles modified page writer thread
 #define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
@@ -113,7 +113,7 @@ typedef struct _PFNdata {
     ULONG64 refCount: 16;
     ULONG64 remodifiedBit: 1;        
     volatile LONG lockBits;                // 31 free bits if necessary
-    PHANDLE readInProgEvent;
+    HANDLE readInProgEvent;
 } PFNdata, *PPFNdata;
 
 typedef struct _listData {
