@@ -29,7 +29,7 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
     } 
     
     //
-    // Set aging bit to 1 (recently accessed)
+    // Set aging bit to 0 (recently accessed)
     //
 
     snapPTE.u1.hPTE.agingBit = 0;
@@ -255,7 +255,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     newPTE.u1.hPTE.validBit = 1;
 
     //
-    // Set aging bit to 1 (recently accessed)
+    // Set aging bit to 0 (recently accessed)
     //
 
     newPTE.u1.hPTE.agingBit = 0;
@@ -279,7 +279,6 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     if (bResult != TRUE) {
         PRINT_ERROR("[trans PageFault] Kernel state issue: Error virtual protecting VA with permissions %u\n", transRWEpermissions);
     }
-
 
     //
     // Both PFN and PTE have completed modification. PFN lock can be released, PTE lock is released by caller.
@@ -319,13 +318,24 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     }
 
-
     //
-    // TODO - FORWARD PROG issue. PTE lock held and getPageAlways waits for an event, need aging/trimming thread
-    // However, the issue is that the PTE lock remains held through getPageAlways, thus preventing trimming
+    // dequeue a page of memory from freed list
     //
 
-    freedPFN = getPageAlways(TRUE);         
+    freedPFN = getPage(TRUE);
+
+    if (freedPFN == NULL) {
+
+        //
+        // Return immediately to caller so PTE lock can be released
+        // No page lock is held since getPage call failed
+        // Signals to caller to wait for new pages and then re-fault post 
+        // release of PTE lock
+        //
+
+        return NO_AVAILABLE_PAGES;
+
+    }        
 
     //
     // Set PFN status bits to standby and read in progress bit to signal to another faulter an IO read is occurring
@@ -457,9 +467,8 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     newPTE.u1.hPTE.validBit = 1;
 
-
     //
-    // Set aging bit to 1 (recently accessed)
+    // Set aging bit to 0 (recently accessed)
     //
 
     newPTE.u1.hPTE.agingBit = 0;
@@ -546,12 +555,17 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
     // declare pageNum (PFN) ULONG
     ULONG_PTR pageNum;
-
+    ULONG_PTR PTEindex;
+    PPFNdata freedPFN;
     PTE newPTE;
+    PTEpermissions dZeroRWEpermissions;
+    DWORD oldPermissions;
+    BOOL bresult;
+
+
     newPTE.u1.ulongPTE = 0;
 
     // check permissions
-    PTEpermissions dZeroRWEpermissions;
     dZeroRWEpermissions = snapPTE.u1.dzPTE.permissions;
 
     if (!checkPTEpermissions(dZeroRWEpermissions, RWEpermissions)) {
@@ -568,15 +582,30 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
     }
 
-
+    //
     // calculate PTEindex
-    ULONG_PTR PTEindex;
+    //
+
     PTEindex = masterPTE - PTEarray;
 
-
+    //
     // dequeue a page of memory from freed list, setting status bits to active
-    PPFNdata freedPFN;
-    freedPFN = getPageAlways(TRUE);
+    //
+
+    freedPFN = getPage(TRUE);
+
+    if (freedPFN == NULL) {
+
+        //
+        // Return immediately to caller so PTE lock can be released
+        // No page lock is held since getPage call failed
+        // Signals to caller to wait for new pages and then re-fault post 
+        // release of PTE lock
+        //
+
+        return NO_AVAILABLE_PAGES;
+
+    }   
 
 
     // set PFN status to active
@@ -588,8 +617,10 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     // RELEASE pfn lock so that it can now be viewed/modified by other threads
     releaseJLock(&freedPFN->lockBits);
 
-
+    //
     // calculate PFN index and assign in PTE field
+    //
+
     pageNum = freedPFN - PFNarray;
     newPTE.u1.hPTE.PFN = pageNum;
 
@@ -600,31 +631,44 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     newPTE.u1.hPTE.validBit = 1;
 
     //
-    // Set aging bit to 1 (recently accessed)
+    // Set aging bit to 0 (recently accessed)
     //
 
     newPTE.u1.hPTE.agingBit = 0;
 
-    // copy permissions from transition PTE into our soon-to-be-active PTE
+    //
+    // copy permissions from demand zero PTE into our soon-to-be-active PTE
+    //
+
     transferPTEpermissions(&newPTE, dZeroRWEpermissions);
 
-    // compiler writes out as indivisible store
+    //
+    // Compiler writes out new PTE indivisibly (although PTE lock is held anyway)
+    //
+
     * (volatile PTE *) masterPTE = newPTE;
     
-    DWORD oldPermissions;
+    //
+    // Note: Without PTE locking/synchronization, the time between MapUserPhysicalPages
+    // and VirtualProtect calls would result in an exploitable lack of permissions protection
+    //
 
-    // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a lack of permissions protection
-
-    BOOL bresult;
-
+    //
     // assign VA to point at physical page, mirroring our local PTE change
+    //
+
     bresult = MapUserPhysicalPages(virtualAddress, 1, &pageNum);
+
     if (bresult != TRUE) {
         PRINT_ERROR("[dz PageFault] Error mapping user physical pages\n");
     }
 
+    //
     // update physical permissions of hardware PTE to match our software reference.
+    //
+
     bresult = VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[dZeroRWEpermissions], &oldPermissions);
+
     if (bresult != TRUE) {
         PRINT_ERROR("[dz PageFault] Error virtual protecting VA with permissions %u\n", dZeroRWEpermissions);
     }
@@ -762,6 +806,20 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     //
 
     releasePTELock(currPTE);
+
+
+    //
+    // If a demand zero/pagefile fault failed due to lack of available pages, wait on new page events before 
+    // return status and refaulting (but release PTE lock first so trimming/modified writing can occur)
+    //
+
+    if (status == NO_AVAILABLE_PAGES) {
+
+        HANDLE pageEventHandles[] = {zeroListHead.newPagesEvent, freeListHead.newPagesEvent, standbyListHead.newPagesEvent};
+
+        WaitForMultipleObjects(STANDBY + 1, pageEventHandles, TRUE, INFINITE);
+
+    }
     
     return status;
 

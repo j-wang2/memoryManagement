@@ -14,11 +14,13 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
     faultStatus PFstatus;
     PFstatus = SUCCESS;
 
-    // while (PFstatus == SUCCESS || PFstatus == PAGE_STATE_CHANGE) {
-    while (PFstatus == SUCCESS) {
+    while (PFstatus == SUCCESS || PFstatus == NO_AVAILABLE_PAGES || PFstatus == PAGE_STATE_CHANGE ) {
+        
+        #ifdef TEMP_TESTING
 
-
-    #ifdef TEMP_TESTING
+        //
+        // For special pool/application verifier
+        //
 
         PPTE currPTE;
         currPTE = getPTE(virtualAddress);
@@ -52,6 +54,7 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
                 } 
 
                 releaseJLock(&currPFN->lockBits);
+
                 return SUCCESS;
 
             }
@@ -70,7 +73,8 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
         }
 
 
-    #else
+        #else
+
         _try {
 
             if (RWEpermissions == READ_ONLY || READ_EXECUTE) {
@@ -95,7 +99,7 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
 
         }
 
-    #endif
+        #endif
 
     }
 
@@ -373,7 +377,7 @@ trimPTE(PPTE PTEaddress)
     releasePTELock(PTEaddress);
 
     if (wakeModifiedWriter == TRUE) {
-        
+
         BOOL bRes;
         bRes = SetEvent(wakeModifiedWriterHandle);
 

@@ -53,8 +53,9 @@ getPage(BOOLEAN returnLocked);
 
 
 /*
- * getPageALways: function to get available page, waits if lists are initially empty
+ * getPageAlways: function to get available page, waits if lists are initially empty
  * - wrapper function for getPage
+ * - should never be called while holding a lock (since wait can cause deadlock)
  * 
  * Returns PPFNdata (always successful)
  * 

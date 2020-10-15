@@ -563,6 +563,9 @@ BOOLEAN
 modifiedPageWriter()
 {
 
+    BOOLEAN wakeModifiedWriter;
+    wakeModifiedWriter = FALSE;
+
     PRINT("[modifiedPageWriter] modifiedListCount == %llu\n", modifiedListHead.count);
     PPFNdata PFNtoWrite;
 
@@ -640,7 +643,7 @@ modifiedPageWriter()
         // (since page has either failed write or been re-modified, i.e. write->write fault->trim)
         if (PFNtoWrite->statusBits != ACTIVE) {
 
-            enqueuePage(&modifiedListHead, PFNtoWrite);     // TODO - check waking modified writer
+            wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoWrite);
 
         }
 
@@ -695,6 +698,17 @@ modifiedPageWriter()
     }
 
     releaseJLock(&PFNtoWrite->lockBits);
+
+    if (wakeModifiedWriter == TRUE) {
+        
+        BOOL bRes;
+        bRes = SetEvent(wakeModifiedWriterHandle);
+
+        if (bRes != TRUE) {
+            PRINT_ERROR("[trimPTE] failed to set event\n");
+        }
+    }
+
 
     return TRUE;   
 
@@ -911,13 +925,6 @@ trimValidPTEs()
 
                 currPTE->u1.hPTE.agingBit = 1;
 
-
-                // if ((ULONG_PTR) currPTE % 3 == 0) {     // TODOO - temp
-
-                //     currPTE->u1.hPTE.agingBit = 1;
-                //     // DebugBreak();
-
-                // }
             }
 
         }
@@ -1480,7 +1487,19 @@ freeVirtualMemory()
     freeVAList(&readPFVAListHead);
 
     BOOL bRes = CloseHandle(availablePagesLowHandle);       // TODO - check ret val and abstract
+
+    if (bRes != TRUE) {
+
+        PRINT_ERROR("Unable to close handle\n");
+
+    }
     bRes = CloseHandle(wakeModifiedWriterHandle);       // TODO - check ret val and abstract
+
+    if (bRes != TRUE) {
+
+        PRINT_ERROR("Unable to close handle\n");
+        
+    }
 
 }
 

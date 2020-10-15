@@ -27,8 +27,6 @@ checkAvailablePages(PFNstatus dequeuedStatus)
             if (bRes != TRUE) {
                 PRINT_ERROR("Failed to set event successfully\n");
             }
-
-            // modifiedPageWriter();               // : TODO - verify modified page event workingneed to check ret val?
             
         }
 

@@ -113,8 +113,12 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     newPage = getFreePage(FALSE);
 
     if (newPage == NULL) {
-        newPage = getPageAlways(FALSE);
+        newPage = getPage(FALSE);
     }
+
+    //
+    // Todo- check if newpage isnull again (as in pagefault)
+    //
 
     ULONG_PTR newPFN;
     newPFN = newPage - PFNarray;

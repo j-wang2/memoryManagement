@@ -163,7 +163,7 @@ typedef enum {
 typedef enum {
     SUCCESS,            // 0
     ACCESS_VIOLATION,   // 1
-    NO_FREE_PAGES,      // 2
+    NO_AVAILABLE_PAGES, // 2
     PAGE_STATE_CHANGE,  // 3
 } faultStatus;
 
