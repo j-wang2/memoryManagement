@@ -29,6 +29,12 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
     } 
     
     //
+    // Set aging bit to 1 (recently accessed)
+    //
+
+    snapPTE.u1.hPTE.agingBit = 0;
+
+    //
     // Check for Write permissions - if write, set dirty bit and clear PF
     //
 
@@ -125,7 +131,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
     if (snapPTE.u1.ulongPTE != masterPTE->u1.ulongPTE) {
 
-        releaseJLock(&transitionPFN->lockBits);     // todo: check
+        releaseJLock(&transitionPFN->lockBits);
 
         PRINT("[transPageFault] page has been repurposed from standby list\n");
 
@@ -164,6 +170,8 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
         if (InterlockedDecrement(&currEventNode->refCount) == 0){
 
+            DebugBreak();
+
             transitionPFN->readInProgEvent = NULL;
 
             enqueueEvent(&readInProgEventListHead, currEventNode);
@@ -187,8 +195,6 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     //
     
     if (permissionMasks[RWEpermissions] & writeMask) { 
-
-        newPTE.u1.hPTE.dirtyBit = 1;
 
 
         // if the write in progress bit is clear, immediately free pf location 
@@ -248,6 +254,13 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
     newPTE.u1.hPTE.validBit = 1;
 
+    //
+    // Set aging bit to 1 (recently accessed)
+    //
+
+    newPTE.u1.hPTE.agingBit = 0;
+
+
     * (volatile PTE *) masterPTE = newPTE;
     
     // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a brief lack of permissions protection
@@ -267,7 +280,11 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         PRINT_ERROR("[trans PageFault] Kernel state issue: Error virtual protecting VA with permissions %u\n", transRWEpermissions);
     }
 
-    // TODO - check
+
+    //
+    // Both PFN and PTE have completed modification. PFN lock can be released, PTE lock is released by caller.
+    //
+
     releaseJLock(&transitionPFN->lockBits);
 
     return SUCCESS;
@@ -304,7 +321,8 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
 
     //
-    // // TODO - forward progress issue. PTE lock held and getPageAlways waits for an event, need aging/trimming thread
+    // TODO - FORWARD PROG issue. PTE lock held and getPageAlways waits for an event, need aging/trimming thread
+    // However, the issue is that the PTE lock remains held through getPageAlways, thus preventing trimming
     //
 
     freedPFN = getPageAlways(TRUE);         
@@ -439,6 +457,13 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     newPTE.u1.hPTE.validBit = 1;
 
+
+    //
+    // Set aging bit to 1 (recently accessed)
+    //
+
+    newPTE.u1.hPTE.agingBit = 0;
+
     //
     // If attempting to write, set dirty bit & clear PF location if it exists
     //
@@ -447,10 +472,13 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
         newPTE.u1.hPTE.dirtyBit = 1;
 
+        //
         // free PF location 
-        // TODO: if two threads clear near-simultaneously, the PFbit index could be 
-        // used for another unrelated purpose and then the second thread would clear
-        // data that is unrelated and unexpected
+        // Note: locking is required, since if two threads clear near-simultaneously, 
+        // the PFbit index could be used for another unrelated purpose and then the 
+        // second thread would clear data that is unrelated and unexpected
+        //
+
         clearPFBitIndex(snapPTE.u1.pfPTE.pageFileIndex);
 
         // clear pagefile pointer out of PFN
@@ -495,7 +523,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     ASSERT(freedPFN->readInProgressBit == 1);
     freedPFN->readInProgressBit = 0;
     
-    SetEvent(freedPFN->readInProgEvent);        // TODO - has caused invalid handle error
+    SetEvent(freedPFN->readInProgEvent);
 
     if (InterlockedDecrement(&readInProgEventNode->refCount) == 0){
 
@@ -537,6 +565,7 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
         // set PTE to dirty
         newPTE.u1.hPTE.dirtyBit = 1;
+
     }
 
 
@@ -564,8 +593,17 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     pageNum = freedPFN - PFNarray;
     newPTE.u1.hPTE.PFN = pageNum;
 
-    // change PTE to validBit;
+    //
+    // change PTE to valid (setting valid bit)
+    // 
+
     newPTE.u1.hPTE.validBit = 1;
+
+    //
+    // Set aging bit to 1 (recently accessed)
+    //
+
+    newPTE.u1.hPTE.agingBit = 0;
 
     // copy permissions from transition PTE into our soon-to-be-active PTE
     transferPTEpermissions(&newPTE, dZeroRWEpermissions);

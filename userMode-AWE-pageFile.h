@@ -67,6 +67,7 @@ typedef struct _hardwarePTE{
     ULONG64 writeBit: 1;            // read if 0, write if 1
     ULONG64 executeBit: 1;
     ULONG64 dirtyBit: 1;
+    ULONG64 agingBit: 1;
     ULONG64 PFN: PFN_BITS;          //  page frame number (PHYSICAL)
 } hardwarePTE, *PhardwarePTE;
 
@@ -217,6 +218,11 @@ extern listData readInProgEventListHead;
 
 extern CRITICAL_SECTION PTELock;            // coarse-grained lock on page table/directory
 
+extern HANDLE availablePagesLowHandle;
+
+extern HANDLE wakeModifiedWriterHandle;
+
+
 
 // toggle multithreading on and off
 #define MULTITHREADING
@@ -316,6 +322,24 @@ modifiedPageWriter();
 
 DWORD WINAPI
 modifiedPageThread();
+
+
+BOOLEAN
+faultAndAccessTest();
+
+
+DWORD WINAPI
+faultAndAccessTestThread(HANDLE terminationHandle);
+
+
+
+ULONG_PTR
+trimValidPTEs();
+
+
+DWORD WINAPI
+trimValidPTEThread(HANDLE terminationHandle);
+
 
 
 /********* LOCAL functions *******/

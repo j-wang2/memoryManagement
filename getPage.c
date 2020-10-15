@@ -226,7 +226,7 @@ getPageAlways(BOOLEAN returnLocked)
 
     while (TRUE) {
 
-        // dequeue and return a LOCKED page (PFN lock must be released)
+        // dequeue and return a LOCKED page (PFN lock must be released at a later point)
         freedPFN = getPage(returnLocked);
 
         if (freedPFN == NULL) {

@@ -54,6 +54,10 @@ HANDLE physicalPageHandle;              // for multi-mapped pages (to support mu
 
 BOOLEAN debugMode;                      // toggled by -v flag on cmd line
 
+HANDLE availablePagesLowHandle;
+
+HANDLE wakeModifiedWriterHandle;
+
 ULONG_PTR numPagesReturned;
 
 
@@ -344,7 +348,7 @@ zeroPage(ULONG_PTR PFN)
 
     while (zeroVANode == NULL) {
         
-        PRINT("[zeroPage] TODO: waiting for release\n");
+        PRINT("[zeroPage] Waiting for release of event node (list empty)\n");
 
         WaitForSingleObject(zeroVAListHead.newPagesEvent, INFINITE);
 
@@ -636,7 +640,7 @@ modifiedPageWriter()
         // (since page has either failed write or been re-modified, i.e. write->write fault->trim)
         if (PFNtoWrite->statusBits != ACTIVE) {
 
-            enqueuePage(&modifiedListHead, PFNtoWrite);
+            enqueuePage(&modifiedListHead, PFNtoWrite);     // TODO - check waking modified writer
 
         }
 
@@ -707,7 +711,9 @@ modifiedPageThread(HANDLE terminationHandle)
     // create local handle array
     HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
-    handleArray[1] = modifiedListHead.newPagesEvent;
+    // handleArray[1] = modifiedListHead.newPagesEvent;
+    handleArray[1] = wakeModifiedWriterHandle;
+
 
     // write out modified pages to pagefile until modified page list empty
     while (TRUE) {
@@ -733,13 +739,12 @@ modifiedPageThread(HANDLE terminationHandle)
 
 
 BOOLEAN
-faultAndAccessTest(){
-/************** TESTING *****************/
+faultAndAccessTest()
+{
+
+    /************** TESTING *****************/
     void* testVA;
     testVA = leafVABlock;
-
-
-    PRINT_ALWAYS("--------------------------------\n");
 
 
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
@@ -820,12 +825,6 @@ faultAndAccessTest(){
     }
 
 
-
-    
-
-    PRINT_ALWAYS("--------------------------------\n");
-
-
     /****************** FAULTING back in trimmed pages ******************/
 
     testVA = leafVABlock;
@@ -869,6 +868,132 @@ faultAndAccessTestThread(HANDLE terminationHandle) {
     return 0;
 
 }
+
+
+ULONG_PTR
+trimValidPTEs()
+{
+    PPTE currPTE;
+    currPTE = PTEarray;
+
+    PPTE endPTE;
+    endPTE = PTEarray + (((ULONG_PTR)leafVABlockEnd - (ULONG_PTR)leafVABlock) / PAGE_SIZE);
+
+    ULONG_PTR numTrimmed;
+    numTrimmed = 0;
+
+    for (currPTE; currPTE < endPTE; currPTE++ ) {
+
+        //
+        // If currPTE is valid/active
+        //
+
+        acquirePTELock(currPTE);
+
+        if (currPTE->u1.hPTE.validBit == 1) {
+
+            // todo- add assert for pfn??
+
+            //
+            // If aging bit remains set
+            //
+
+            if (currPTE->u1.hPTE.agingBit == 1) {
+                BOOLEAN bRes;
+                bRes = trimPTE(currPTE);
+                if (bRes == FALSE) {
+                    DebugBreak();
+                } else {
+                    numTrimmed++;
+                }
+            }
+            else {
+
+                currPTE->u1.hPTE.agingBit = 1;
+
+
+                // if ((ULONG_PTR) currPTE % 3 == 0) {     // TODOO - temp
+
+                //     currPTE->u1.hPTE.agingBit = 1;
+                //     // DebugBreak();
+
+                // }
+            }
+
+        }
+
+        releasePTELock(currPTE);
+
+    }
+    return numTrimmed;
+
+
+}
+
+
+DWORD WINAPI
+trimValidPTEThread(HANDLE terminationHandle) {
+
+    // write out modified pages to pagefile until modified page list empty
+    ULONG_PTR numTrimmed;
+    numTrimmed = 0;
+
+    
+    // create local handle array
+    HANDLE handleArray[2];
+    handleArray[0] = terminationHandle;
+    handleArray[1] = availablePagesLowHandle;
+
+    while (TRUE) {
+
+        DWORD retVal;
+        retVal = WaitForMultipleObjects(2, handleArray, FALSE, INFINITE);
+
+        DWORD index = retVal - WAIT_OBJECT_0;
+
+        if (index == 0) {
+            PRINT_ALWAYS("trimPTEthread - numPTEs trimmed : %llu\n", numTrimmed);
+            return 0;
+        }
+
+        ULONG_PTR currNum;
+        currNum = trimValidPTEs();
+
+        numTrimmed += currNum;
+    }
+
+
+
+    // while (TRUE)
+    // {
+    //     ULONG_PTR currNum;
+    //     currNum = trimValidPTEs();
+
+    //     numTrimmed += currNum;
+
+    //     DWORD waitRes;
+    //     waitRes = WaitForSingleObject(terminationHandle, 100);
+
+    //     if (waitRes == WAIT_TIMEOUT) {
+    //         continue;
+    //     }
+    //     else if (waitRes == WAIT_OBJECT_0) {
+    //         PRINT_ALWAYS("trimPTEthread - numPTEs trimmed : %llu\n", numTrimmed);
+    //         return 0;
+    //     } else if (waitRes == WAIT_ABANDONED) {
+    //         PRINT_ALWAYS("wait abandoned\n");
+    //         ASSERT(FALSE);
+
+    //     } else if (waitRes == WAIT_FAILED) {
+    //         PRINT_ALWAYS("wait abandoned\n");
+
+    //         ASSERT(FALSE);
+    //     }
+    // }
+
+    return 0;
+}
+
 
 VOID
 initLinkHead(PLIST_ENTRY headLink)
@@ -1194,6 +1319,19 @@ testRoutine()
     }
     #endif
 
+    PRINT_ALWAYS(" - %d PTE trimming threads\n", NUM_THREADS);
+
+    HANDLE trimThreadHandles[NUM_THREADS];
+    for (int i = 0; i < NUM_THREADS; i++) {
+
+        trimThreadHandles[i] = CreateThread(NULL, 0, trimValidPTEThread, terminateThreadsHandle, 0, NULL);
+            
+        if (trimThreadHandles[i] == INVALID_HANDLE_VALUE) {
+            PRINT_ERROR("failed to create modifiedPageWriting handle\n");
+        }
+  
+    }
+
     /**************************************/
 
 
@@ -1225,6 +1363,7 @@ testRoutine()
     WaitForMultipleObjects(NUM_THREADS, modifiedPageWriterThreadHandles, TRUE, INFINITE);
     #endif
 
+    WaitForMultipleObjects(NUM_THREADS, trimThreadHandles, TRUE, INFINITE);
 
     WaitForMultipleObjects(NUM_THREADS, testHandles, TRUE, INFINITE);
 
@@ -1300,6 +1439,22 @@ initializeVirtualMemory()
     // create PageFile section of memory
     initPageFile(PAGEFILE_SIZE);
 
+    availablePagesLowHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    if (availablePagesLowHandle == INVALID_HANDLE_VALUE) {
+        PRINT_ERROR("failed to create event handle\n");
+        exit(-1);
+    }
+
+    wakeModifiedWriterHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    if (wakeModifiedWriterHandle == INVALID_HANDLE_VALUE) {
+        PRINT_ERROR("failed to create event handle\n");
+        exit(-1);
+    }
+
+
+
     return numPagesReturned;
 
 }
@@ -1323,6 +1478,9 @@ freeVirtualMemory()
     freeVAList(&zeroVAListHead);
     freeVAList(&writeVAListHead);
     freeVAList(&readPFVAListHead);
+
+    BOOL bRes = CloseHandle(availablePagesLowHandle);       // TODO - check ret val and abstract
+    bRes = CloseHandle(wakeModifiedWriterHandle);       // TODO - check ret val and abstract
 
 }
 

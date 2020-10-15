@@ -265,22 +265,23 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 }
 
 
+
 BOOLEAN
-trimVA(void* virtualAddress)
+trimPTE(PPTE PTEaddress) 
 {
 
-    PRINT("[trimVA] trimming page with VA %llu\n", (ULONG_PTR) virtualAddress);
-
-    PPTE PTEaddress;
-    PTEaddress = getPTE(virtualAddress);
+    BOOLEAN wakeModifiedWriter;
 
     if (PTEaddress == NULL) {
-        PRINT_ERROR("could not trim VA %llu - no PTE associated with address\n", (ULONG_PTR) virtualAddress);
+        PRINT_ERROR("could not trim - invalid PTE\n");
         return FALSE;
     }
     
     // take snapshot of old PTE
     PTE oldPTE;
+
+    wakeModifiedWriter = FALSE;
+
 
     // acquire PTE lock
     acquirePTELock(PTEaddress);
@@ -291,7 +292,7 @@ trimVA(void* virtualAddress)
     if (oldPTE.u1.hPTE.validBit == 0) {
 
         releasePTELock(PTEaddress);
-        PRINT("could not trim VA %llu - PTE is not valid\n", (ULONG_PTR) virtualAddress);
+        PRINT("could not trim - PTE is not valid\n");
         return FALSE;
 
     }
@@ -313,8 +314,11 @@ trimVA(void* virtualAddress)
     PTEtoTrim.u1.ulongPTE = 0;
 
 
+    PVOID currVA;
+    currVA = (PVOID) ( (ULONG_PTR) leafVABlock + (PTEaddress - PTEarray) *PAGE_SIZE );
+    
     // unmap page from VA (invalidates hardwarePTE)
-    MapUserPhysicalPages(virtualAddress, 1, NULL);
+    MapUserPhysicalPages(currVA, 1, NULL);
 
 
     // acquire page lock (prior to viewing/editing PFN fields)
@@ -350,7 +354,7 @@ trimVA(void* virtualAddress)
         else if (oldPTE.u1.hPTE.dirtyBit == 1) {
 
             // add given VA's page to modified list;
-            enqueuePage(&modifiedListHead, PFNtoTrim);
+            wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoTrim);
 
         }
     }
@@ -368,8 +372,30 @@ trimVA(void* virtualAddress)
 
     releasePTELock(PTEaddress);
 
+    if (wakeModifiedWriter == TRUE) {
+        
+        BOOL bRes;
+        bRes = SetEvent(wakeModifiedWriterHandle);
+
+        if (bRes != TRUE) {
+            PRINT_ERROR("[trimPTE] failed to set event\n");
+        }
+    }
 
     return TRUE;
+}
+
+
+BOOLEAN
+trimVA(void* virtualAddress)
+{
+
+    PRINT("[trimVA] trimming page with VA %llu\n", (ULONG_PTR) virtualAddress);
+
+    PPTE PTEaddress;
+    PTEaddress = getPTE(virtualAddress);
+
+    return trimPTE(PTEaddress);
 
 }
 

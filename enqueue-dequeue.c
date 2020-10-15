@@ -15,7 +15,20 @@ checkAvailablePages(PFNstatus dequeuedStatus)
 
     
         if (availablePageCount < 10) {
-            modifiedPageWriter();               // : need to check ret val?
+
+            //
+            // Set event, signaling trimming thread to resume trimming active pages
+            // and replenish the available pages lists
+            //
+
+            BOOL bRes;
+            bRes = SetEvent(availablePagesLowHandle); 
+
+            if (bRes != TRUE) {
+                PRINT_ERROR("Failed to set event successfully\n");
+            }
+
+            // modifiedPageWriter();               // : TODO - verify modified page event workingneed to check ret val?
             
         }
 
@@ -39,13 +52,15 @@ enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem)
 }
 
 
-VOID
+BOOLEAN
 enqueuePage(PlistData listHead, PPFNdata PFN)
 {
+    BOOLEAN wakeModifiedWriter;
+    PFNstatus listStatus;
+
+    wakeModifiedWriter = FALSE;
 
     ASSERT(PFN->lockBits != 0);
-
-    // ASSERT(PFN->writeInProgressBit == 0);
 
     //lock listHead (since listHead values are not changed/accessed until dereferenced)
     EnterCriticalSection(&(listHead->lock));
@@ -60,11 +75,22 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
     SetEvent(listHead->newPagesEvent);
     #endif
 
+    listStatus = listHead - listHeads;
+
+    if (listStatus == MODIFIED) {
+        if (listHead->count > 10) {
+            wakeModifiedWriter = TRUE;
+        }
+    }
+
     // unlock listHead
     LeaveCriticalSection(&(listHead->lock));
 
+
     // set statusBits to the list we've just enqueued the page on
-    PFN->statusBits = listHead - listHeads;
+    PFN->statusBits = listStatus;
+
+    return wakeModifiedWriter;
 }
 
 

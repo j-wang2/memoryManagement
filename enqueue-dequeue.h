@@ -30,15 +30,19 @@ enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem);
  * enqueuePage: SYNCHRONIZED wrapper function for enqueue PFN to head of specified list
  *  - also updates pageCount and the statusBits of the PFN that has just been enqueued
  *  - expects page lock to be held upon call, acquires and releases listhead lock
- * No return value
+ *
+ * Returns BOOLEAN
+ *  - TRUE if we need to run modified writer
+ *  - false if not
  */
-VOID
+BOOLEAN
 enqueuePage(PlistData listHead, PPFNdata PFN);
 
 /*
  * dequeuePage: function to dequeue an item from the head of a specified list
  *  - Caller must pre-acquire locks
- *  - checks number of available pages, running modified writer if low (TODO: add active trimming as well)
+ *  - checks number of available pages, signaling an event to trim active list
+ *    and running modified writer if low
  * 
  * Returns PPFNdata
  *  - PPFNdata returnPFN on success
@@ -68,7 +72,8 @@ dequeueLockedPage(PlistData listHead, BOOLEAN returnLocked);
 /*
  * dequeuePageFromTail: function to dequeue an item from the tail of a specified list
  *  - same as dequeuePage, but just removes from the tail
- *  - checks number of available pages, running modified writer if low (TODO: add active trimming as well)
+ *  - checks number of available pages, signaling an event to trim active list
+ *    and running modified writer if low
  * 
  * Returns PLIST_ENTRY
  *  - PLIST_ENTRY returnItem on success
@@ -108,7 +113,8 @@ dequeueSpecific(PLIST_ENTRY removeItem);
  * dequeueSpecificPage: SYNCHRONIZED wrapper function for dequeueSpecific that takes a PPFN as the param
  *  - also decrements count for a list
  *  - does NOT change the PFN's status bits itself
- *  - checks number of available pages, running modified writer if low (TODO: add active trimming as well)
+ *  - checks number of available pages, signaling an event to trim active list
+ *    and running modified writer if low
  *  - EXPECTS page lock to be held upon call, acquires and releases listhead lock
  * 
  * No return value

@@ -169,7 +169,7 @@ readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex) {
 
     while (readPFVANode == NULL) {
 
-        PRINT("[pageFilePageFault] TODO: waiting for release\n");
+        PRINT("[pageFilePageFault] Waiting for release of event node (list empty)\n");
 
         WaitForSingleObject(readPFVAListHead.newPagesEvent, INFINITE);
 
@@ -205,6 +205,8 @@ readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex) {
         PRINT_ERROR("error copying page from into page\n");
         return FALSE;
     }
+
+    enqueueVA(&readPFVAListHead, readPFVANode);
 
     return TRUE;
     

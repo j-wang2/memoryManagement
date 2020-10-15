@@ -64,6 +64,9 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize);
 BOOLEAN
 protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize);
 
+BOOLEAN
+trimPTE(PPTE PTEaddress);
+
 
 /*
  * trimVA(void* VA): function to trim the entire containing page corresponding to VA param
