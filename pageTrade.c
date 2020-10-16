@@ -184,6 +184,7 @@ tradeVA(PVOID virtualAddress)
         return FALSE;
     }
 
+
     PTE snapPTE;
     snapPTE = *currPTE;
 
@@ -204,6 +205,8 @@ tradeVA(PVOID virtualAddress)
     }
 
     // resnap PTE 
+    acquirePTELock(currPTE);
+
     snapPTE = *currPTE;
 
     if (snapPTE.u1.tPTE.transitionBit == 1) {
@@ -212,6 +215,7 @@ tradeVA(PVOID virtualAddress)
         tResult = tradeTransitionPage(snapPTE.u1.tPTE.PFN);
 
         if (tResult == FALSE) {
+            releasePTELock(currPTE);
             PRINT_ERROR("[tradeVA] unable to trade transition page\n");
             return FALSE;
         }
@@ -224,12 +228,16 @@ tradeVA(PVOID virtualAddress)
             pageFault(virtualAddress, READ_ONLY);
 
         }
+
+        releasePTELock(currPTE);
+        
         return TRUE;
     }
 
     else {
         // no page associated
-        PRINT_ERROR("[tradeVA] Address not mapped to page\n");
+        releasePTELock(currPTE);
+        PRINT("[tradeVA] Address not mapped to page\n");    // TODO - is this an error
         return FALSE;
     }
 }

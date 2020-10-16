@@ -115,26 +115,27 @@ writeVA(PVOID virtualAddress, PVOID str)
     faultStatus PFstatus;
     PPTE currPTE;
 
-    //
-    // Acquire and hold lock from pre-fault to post-write
-    //
-
-    currPTE = getPTE(virtualAddress);
-    acquirePTELock(currPTE);
-
     PFstatus = accessVA(virtualAddress, READ_WRITE);
 
-    //
-    // If VA access is successful, write parameter str to the VA
-    //
+    while (PFstatus == SUCCESS || PFstatus == NO_AVAILABLE_PAGES || PFstatus == PAGE_STATE_CHANGE ) {
 
-    if (PFstatus == SUCCESS) {
+        _try {
 
-        * (PVOID *) virtualAddress = str;
-        
+            //
+            // Try to write parameter str to the VA
+            //
+
+            * (PVOID *) virtualAddress = str;
+            
+            break;
+
+        } _except (EXCEPTION_EXECUTE_HANDLER) {
+
+            PFstatus = accessVA(virtualAddress, READ_WRITE);
+
+        }
+
     }
-
-    releasePTELock(currPTE);
 
     return PFstatus;
     
@@ -275,14 +276,16 @@ trimPTE(PPTE PTEaddress)
 {
 
     BOOLEAN wakeModifiedWriter;
+    PTE oldPTE;
+    ULONG_PTR pageNum;
+    PPFNdata PFNtoTrim;
+    PVOID currVA;
 
     if (PTEaddress == NULL) {
         PRINT_ERROR("could not trim - invalid PTE\n");
         return FALSE;
     }
     
-    // take snapshot of old PTE
-    PTE oldPTE;
 
     wakeModifiedWriter = FALSE;
 
@@ -302,11 +305,9 @@ trimPTE(PPTE PTEaddress)
     }
 
     // get pageNum
-    ULONG_PTR pageNum;
     pageNum = oldPTE.u1.hPTE.PFN;
 
     // get PFN
-    PPFNdata PFNtoTrim;
     PFNtoTrim = PFNarray + pageNum;
 
 
@@ -318,7 +319,6 @@ trimPTE(PPTE PTEaddress)
     PTEtoTrim.u1.ulongPTE = 0;
 
 
-    PVOID currVA;
     currVA = (PVOID) ( (ULONG_PTR) leafVABlock + (PTEaddress - PTEarray) *PAGE_SIZE );
     
     // unmap page from VA (invalidates hardwarePTE)
@@ -516,6 +516,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
 
         currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
+        // TODO - error check currVA?
 
 
         // check if PTE is already zeroed
@@ -550,9 +551,24 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
             }
 
             #ifdef TESTING_VERIFY_ADDRESSES
-            if (!(ULONG_PTR) currVA == * (ULONG_PTR*) currVA) {
-                
-                PRINT_ERROR("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+
+            if ((ULONG_PTR) currVA != * (ULONG_PTR*) currVA) {
+
+                if (* (ULONG_PTR*) currVA == (ULONG_PTR)0) {
+
+                    //
+                    // This may occur if a thread attempts to decommit an address WHILE
+                    // another thread is ACTIVELY WRITING IT (between pagefault and actual writing out)
+                    // 
+                    //
+
+                    ASSERT(FALSE);
+
+                    PRINT("Another thread is currently between pagefault and write in writeVa\n");
+                } else {
+                    PRINT_ERROR("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+
+                }    
                 
             }
             #endif
@@ -563,9 +579,10 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
             // unmap VA from page
             BOOL bResult;
-            bResult = MapUserPhysicalPages(startVA, 1, NULL);
+            bResult = MapUserPhysicalPages(currVA, 1, NULL);
 
             if (bResult != TRUE) {
+
                 PRINT_ERROR("[decommitVA] unable to decommit VA %llx\n", (ULONG_PTR) currVA);
             }
 

@@ -14,6 +14,7 @@
 #include "VApermissions.h"
 #include "pageFault.h"
 #include "jLock.h"
+#include "pageTrade.h"
 
 
 /******************************************************
@@ -480,11 +481,9 @@ zeroPageThread(HANDLE terminationHandle)
 BOOLEAN
 freePageTestWriter()
 {
-    // PRINT("zeroListCount == %llu\n", zeroListHead.count);
 
     PPFNdata PFNtoFree;
     PFNtoFree = dequeueLockedPage(&zeroListHead, FALSE);
-
 
     if (PFNtoFree == NULL) {
         PRINT("zero list empty - could not write out\n");
@@ -497,9 +496,6 @@ freePageTestWriter()
     enqueuePage(&freeListHead, PFNtoFree);
 
     releaseJLock(&PFNtoFree->lockBits);
-
-
-    //  PRINT(" - Moved page from zero -> free \n");
 
     return TRUE;
 }
@@ -874,6 +870,33 @@ faultAndAccessTest()
 DWORD WINAPI
 faultAndAccessTestThread(HANDLE terminationHandle) {
 
+    #ifdef CONTINUOUS_FAULT_TEST
+
+    while (TRUE)
+    {
+        // write out modified pages to pagefile until modified page list empty
+        BOOLEAN bres;
+        bres = faultAndAccessTest();
+
+
+        DWORD waitRes;
+        waitRes = WaitForSingleObject(terminationHandle, 100);
+
+        if (waitRes == WAIT_TIMEOUT) {
+            continue;
+        }
+        else if (waitRes == WAIT_OBJECT_0) {
+            return 0;
+        } else if (waitRes == WAIT_ABANDONED) {
+            PRINT_ERROR("wait abandoned\n");
+
+        } else if (waitRes == WAIT_FAILED) {
+            PRINT_ERROR("wait failed\n");
+        }
+    }
+
+    #else
+
     // write out modified pages to pagefile until modified page list empty
     BOOLEAN bres;
     bres = faultAndAccessTest();
@@ -881,6 +904,7 @@ faultAndAccessTestThread(HANDLE terminationHandle) {
     WaitForSingleObject(terminationHandle, INFINITE);
     return 0;
 
+    #endif
 }
 
 
@@ -968,35 +992,6 @@ trimValidPTEThread(HANDLE terminationHandle) {
 
         numTrimmed += currNum;
     }
-
-
-
-    // while (TRUE)
-    // {
-    //     ULONG_PTR currNum;
-    //     currNum = trimValidPTEs();
-
-    //     numTrimmed += currNum;
-
-    //     DWORD waitRes;
-    //     waitRes = WaitForSingleObject(terminationHandle, 100);
-
-    //     if (waitRes == WAIT_TIMEOUT) {
-    //         continue;
-    //     }
-    //     else if (waitRes == WAIT_OBJECT_0) {
-    //         PRINT_ALWAYS("trimPTEthread - numPTEs trimmed : %llu\n", numTrimmed);
-    //         return 0;
-    //     } else if (waitRes == WAIT_ABANDONED) {
-    //         PRINT_ALWAYS("wait abandoned\n");
-    //         ASSERT(FALSE);
-
-    //     } else if (waitRes == WAIT_FAILED) {
-    //         PRINT_ALWAYS("wait abandoned\n");
-
-    //         ASSERT(FALSE);
-    //     }
-    // }
 
     return 0;
 }
@@ -1355,7 +1350,14 @@ testRoutine()
   
     }
 
-    getchar();
+    char quitChar;
+    quitChar = 'a';
+    while (quitChar != 'q') {
+        quitChar = getchar();
+    }
+    PRINT_ALWAYS("Ending program\n");
+
+    
 
     SetEvent(terminateThreadsHandle);
 

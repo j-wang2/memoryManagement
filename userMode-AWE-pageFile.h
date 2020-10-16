@@ -21,6 +21,8 @@
 #define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
 
 #define MULTIPLE_MAPPINGS                           // enables multiple mappings
+#define CONTINUOUS_FAULT_TEST
+#define TRADE_PAGES
 
 
 
