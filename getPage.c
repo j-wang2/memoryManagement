@@ -212,7 +212,7 @@ getPage(BOOLEAN returnLocked)
     }
 
 
-    PRINT_ALWAYS("[getPage] All lists empty - unable to get page\n");
+    PRINT("[getPage] All lists empty - unable to get page\n");
     
     return returnPFN;                                           // should be NULL
 

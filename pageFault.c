@@ -145,12 +145,12 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
     if (transitionPFN->readInProgressBit == 1) {
 
-        PHANDLE currEvent;
+        HANDLE currEvent;
         PeventNode currEventNode;
 
-        currEvent = transitionPFN->readInProgEvent;
+        currEventNode = transitionPFN->readInProgEventNode;
 
-        currEventNode = CONTAINING_RECORD(currEvent, eventNode, event);
+        currEvent = currEventNode->event;
 
         InterlockedIncrement(&currEventNode->refCount);
 
@@ -162,17 +162,15 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         // Since event is manually reset, this thread will not wait on an event that has already been set
         //
 
-        WaitForSingleObject(transitionPFN->readInProgEvent, INFINITE);
+        WaitForSingleObject(currEvent, INFINITE);
 
         //
         // If refcount is non-zero, the event can no longer be edited
         //
 
         if (InterlockedDecrement(&currEventNode->refCount) == 0){
-
-            DebugBreak();
-
-            transitionPFN->readInProgEvent = NULL;
+            
+            transitionPFN->readInProgEventNode = NULL;
 
             enqueueEvent(&readInProgEventListHead, currEventNode);
 
@@ -364,7 +362,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     }
 
-    freedPFN->readInProgEvent = readInProgEventNode->event;
+    freedPFN->readInProgEventNode = readInProgEventNode;
 
 
     freedPFN->PTEindex = masterPTE - PTEarray;
@@ -532,9 +530,10 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     ASSERT(freedPFN->readInProgressBit == 1);
     freedPFN->readInProgressBit = 0;
     
-    SetEvent(freedPFN->readInProgEvent);
+    
+    SetEvent(readInProgEventNode->event);
 
-    if (InterlockedDecrement(&readInProgEventNode->refCount) == 0){
+    if (InterlockedDecrement(&readInProgEventNode->refCount) == 0) {
 
         freedPFN->readInProgEvent = NULL;
 

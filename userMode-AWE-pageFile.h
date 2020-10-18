@@ -53,6 +53,9 @@
 #define INVALID_PAGEFILE_INDEX 0xfffff              // 20 bits (MUST CORRESPOND TO PAGEFILE BITS)
 
 
+#define PAGES_PER_LOCK 64
+
+
 /**************** assert macro *****************/
 #define ASSERT(x) if((x) == FALSE) DebugBreak()
 
@@ -106,6 +109,12 @@ typedef struct _PTE{
      } u1;
 } PTE, *PPTE;
 
+typedef struct _eventNode {
+    LIST_ENTRY links;
+    HANDLE event;
+    volatile LONG refCount;
+} eventNode, *PeventNode;
+
 typedef struct _PFNdata {
     LIST_ENTRY links;
     ULONG64 statusBits: 5;
@@ -116,6 +125,7 @@ typedef struct _PFNdata {
     ULONG64 refCount: 16;
     ULONG64 remodifiedBit: 1;        
     volatile LONG lockBits;                // 31 free bits if necessary
+    PeventNode readInProgEventNode;
     HANDLE readInProgEvent;
 } PFNdata, *PPFNdata;
 
@@ -131,11 +141,7 @@ typedef struct _VANode {
     PVOID VA;
 } VANode, *PVANode;
 
-typedef struct _eventNode {
-    LIST_ENTRY links;
-    HANDLE event;
-    volatile LONG refCount;
-} eventNode, *PeventNode;
+
 
 
 
@@ -219,6 +225,8 @@ extern listData VADListHead;               // list of VADs
 extern listData readInProgEventListHead;
 
 extern CRITICAL_SECTION PTELock;            // coarse-grained lock on page table/directory
+extern PCRITICAL_SECTION PTELockArray;      // finer-grained lock array for page table/directory (replaces above)
+
 
 extern HANDLE availablePagesLowHandle;
 

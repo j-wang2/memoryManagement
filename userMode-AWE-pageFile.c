@@ -51,6 +51,8 @@ listData readInProgEventListHead;
 
 CRITICAL_SECTION PTELock;
 
+PCRITICAL_SECTION PTELockArray;
+
 HANDLE physicalPageHandle;              // for multi-mapped pages (to support multithreading)
 
 BOOLEAN debugMode;                      // toggled by -v flag on cmd line
@@ -667,7 +669,7 @@ modifiedPageWriter()
     //  - otherwise, continue
     if (PFNtoWrite->statusBits != ACTIVE) {
 
-        ASSERT(currPTE->u1.hPTE.validBit != 1 && currPTE->u1.tPTE.transitionBit == 1);      // TODO - error (standby status page with PTE active)
+        ASSERT(currPTE->u1.hPTE.validBit != 1 && currPTE->u1.tPTE.transitionBit == 1);
 
         // enqueue page to standby (since has not been redirtied)
         enqueuePage(&standbyListHead, PFNtoWrite);
@@ -751,6 +753,7 @@ modifiedPageThread(HANDLE terminationHandle)
 BOOLEAN
 faultAndAccessTest()
 {
+    PRINT_ALWAYS("Fault and access test\n");
 
     /************** TESTING *****************/
     void* testVA;
@@ -799,12 +802,9 @@ faultAndAccessTest()
     }
 
 
-    PRINT_ALWAYS("--------------------------------\n");
-
-
     /************ TRIMMING tested VAs (active -> standby/modified) **************/
 
-    PRINT_ALWAYS("Trimming %llu pages, modified writing half of them\n", testNum);
+    PRINT("Trimming %llu pages, modified writing half of them\n", testNum);
 
     // reset testVa
     testVA = leafVABlock;
@@ -1260,8 +1260,6 @@ testRoutine()
 
     #ifdef MULTITHREADING
 
-    PRINT_ALWAYS("--------------------------------\n");
-
     /************* Creating handles/threads *************/
     PRINT_ALWAYS("Creating threads\n");
 
@@ -1392,6 +1390,46 @@ testRoutine()
 }
 
 
+VOID
+initHandles()
+{
+    availablePagesLowHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    if (availablePagesLowHandle == INVALID_HANDLE_VALUE) {
+        PRINT_ERROR("failed to create event handle\n");
+        exit(-1);
+    }
+
+    wakeModifiedWriterHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    if (wakeModifiedWriterHandle == INVALID_HANDLE_VALUE) {
+        PRINT_ERROR("failed to create event handle\n");
+        exit(-1);
+    }
+}
+
+BOOLEAN
+closeHandles()
+{
+    BOOL bRes = CloseHandle(availablePagesLowHandle);       // TODO - check ret val and abstract
+
+    if (bRes != TRUE) {
+
+        PRINT_ERROR("Unable to close handle\n");
+
+    }
+    bRes = CloseHandle(wakeModifiedWriterHandle);       // TODO - check ret val and abstract
+
+    if (bRes != TRUE) {
+
+        PRINT_ERROR("Unable to close handle\n");
+        
+    }
+
+    return bRes;
+}
+
+
 ULONG_PTR
 initializeVirtualMemory()
 {
@@ -1448,20 +1486,9 @@ initializeVirtualMemory()
     // create PageFile section of memory
     initPageFile(PAGEFILE_SIZE);
 
-    availablePagesLowHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
+    initHandles();
 
-    if (availablePagesLowHandle == INVALID_HANDLE_VALUE) {
-        PRINT_ERROR("failed to create event handle\n");
-        exit(-1);
-    }
-
-    wakeModifiedWriterHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
-
-    if (wakeModifiedWriterHandle == INVALID_HANDLE_VALUE) {
-        PRINT_ERROR("failed to create event handle\n");
-        exit(-1);
-    }
-
+    initPTELocks(virtualMemPages);
 
 
     return numPagesReturned;
@@ -1488,20 +1515,10 @@ freeVirtualMemory()
     freeVAList(&writeVAListHead);
     freeVAList(&readPFVAListHead);
 
-    BOOL bRes = CloseHandle(availablePagesLowHandle);       // TODO - check ret val and abstract
 
-    if (bRes != TRUE) {
+    closeHandles();
 
-        PRINT_ERROR("Unable to close handle\n");
-
-    }
-    bRes = CloseHandle(wakeModifiedWriterHandle);       // TODO - check ret val and abstract
-
-    if (bRes != TRUE) {
-
-        PRINT_ERROR("Unable to close handle\n");
-        
-    }
+    VirtualFree(PTELockArray, 0, MEM_RELEASE);
 
 }
 
