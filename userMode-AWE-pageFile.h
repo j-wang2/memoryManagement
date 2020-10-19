@@ -191,9 +191,6 @@ extern void* leafVABlockEnd;               // ending address of memory block
 extern PPFNdata PFNarray;                  // starting address of PFN array
 extern PPTE PTEarray;                      // starting address of page table
 
-extern void* pageTradeDestVA;              // specific VA used for page trading destination
-extern void* pageTradeSourceVA;            // specific VA used for page trading source
-
 extern LONG totalCommittedPages;      // count of committed pages (initialized to zero)
 extern ULONG_PTR totalMemoryPageLimit;     // limit of committed pages (memory block + pagefile space)
 
@@ -219,6 +216,7 @@ extern listData listHeads[ACTIVE];
 extern listData zeroVAListHead;             // list of zeroVAs used for zeroing PFNs (via AWE mapping)
 extern listData writeVAListHead;            // list of writeVAs used for writing to page file
 extern listData readPFVAListHead;
+extern listData pageTradeVAListHead;
 
 extern listData VADListHead;               // list of VADs
 

@@ -54,31 +54,70 @@ tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)
 BOOLEAN
 copyPage(ULONG_PTR dest, ULONG_PTR src)
 {
+
+    PVOID sourceVA;
+    PVOID destVA;
+
+    PVANode sourceVANode;
+    PVANode destVANode;
+
+    sourceVANode = dequeueLockedVA(&pageTradeVAListHead);
+
+    while (sourceVANode == NULL || destVANode == NULL) {
+        
+        PRINT("[zeroPage] Waiting for release of event node (list empty)\n");
+
+        WaitForSingleObject(pageTradeVAListHead.newPagesEvent, INFINITE);
+
+        if (sourceVANode == NULL) {
+            sourceVANode = dequeueLockedVA(&pageTradeVAListHead);
+
+        } else {
+            ASSERT (destVANode == NULL);
+            destVANode = dequeueLockedVA(&pageTradeVAListHead);
+        }
+
+    }
+
+    sourceVA = sourceVANode->VA;
+
     // map given page to the pageTradeSoureVA
-    if (!MapUserPhysicalPages(pageTradeSourceVA, 1, &src)) {
+    if (!MapUserPhysicalPages(sourceVA, 1, &src)) {
+        enqueueVA(&pageTradeVAListHead, sourceVANode);
+        enqueueVA(&pageTradeVAListHead, destVANode);
         PRINT_ERROR("error remapping srcVA\n");
         return FALSE;
     }
 
     // map given page to the pageTradeDestVA VA
-    if (!MapUserPhysicalPages(pageTradeDestVA, 1, &dest)) {
+    if (!MapUserPhysicalPages(destVA, 1, &dest)) {
+        enqueueVA(&pageTradeVAListHead, sourceVANode);
+        enqueueVA(&pageTradeVAListHead, destVANode);
         PRINT_ERROR("error remapping destVA\n");
         return FALSE;
     }
 
-    memcpy(pageTradeDestVA, pageTradeSourceVA, PAGE_SIZE);
+    memcpy(destVA, sourceVA, PAGE_SIZE);
 
     // unmap pageTradeDestVA from page - PFN is now ready to be alloc'd
-    if (!MapUserPhysicalPages(pageTradeDestVA, 1, NULL)) {
+    if (!MapUserPhysicalPages(destVA, 1, NULL)) {
+        enqueueVA(&pageTradeVAListHead, sourceVANode);
+        enqueueVA(&pageTradeVAListHead, destVANode);
         PRINT_ERROR("error copying page\n");
         return FALSE;
     }
 
         // unmap pageTradeSoureVA from page - PFN is now ready to be alloc'd
-    if (!MapUserPhysicalPages(pageTradeSourceVA, 1, NULL)) {
+    if (!MapUserPhysicalPages(sourceVA, 1, NULL)) {
+
+        enqueueVA(&pageTradeVAListHead, sourceVANode);
+        enqueueVA(&pageTradeVAListHead, destVANode);
         PRINT_ERROR("error copying page\n");
         return FALSE;
     }
+
+    enqueueVA(&pageTradeVAListHead, sourceVANode);
+    enqueueVA(&pageTradeVAListHead, destVANode);
 
     return TRUE;
 

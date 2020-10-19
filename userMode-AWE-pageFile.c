@@ -44,6 +44,7 @@ listData listHeads[ACTIVE];             // page listHeads array
 listData zeroVAListHead;                // listHead of zeroVAs used for zeroing PFNs (via AWE mapping)
 listData writeVAListHead;               // listHead of writeVAs used for writing to page file
 listData readPFVAListHead;              // listHead of pagefile read VAs used for reading from pagefile
+listData pageTradeVAListHead;
 
 listData VADListHead;                   // list of VADs
 
@@ -1437,10 +1438,6 @@ initializeVirtualMemory()
     // initialize zero/free/standby lists 
     initListHeads(listHeads);
 
-    // reserve AWE addresses for page trading
-    pageTradeDestVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
-    pageTradeSourceVA = VirtualAlloc(NULL, PAGE_SIZE, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
-
     // memset the pageFile bit array
     memset(&pageFileBitArray, 0, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );
 
@@ -1465,6 +1462,8 @@ initializeVirtualMemory()
     initVAList(&writeVAListHead, NUM_THREADS + 3);
 
     initVAList(&readPFVAListHead, NUM_THREADS + 3);
+
+    initVAList(&pageTradeVAList, 2*NUM_THREADS + 3);
 
     initEventList(&readInProgEventListHead, NUM_THREADS + 3);
 
