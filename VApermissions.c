@@ -113,7 +113,6 @@ writeVA(PVOID virtualAddress, PVOID str)
 {
 
     faultStatus PFstatus;
-    PPTE currPTE;
 
     PFstatus = accessVA(virtualAddress, READ_WRITE);
 
@@ -170,24 +169,55 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
     PVOID endVA;
     PPTE endPTE;
     PPTE currPTE;
+    BOOLEAN lockHeld;
 
     startPTE = getPTE(startVA);
+
+    if (startPTE == NULL) {
+
+        PRINT("[commitVA] Starting address does not correspond to a valid PTE\n");
+        return FALSE;
+
+    }
 
     // inclusive (use <= as condition)
     endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
 
     endPTE = getPTE(endVA);
 
+    if (endPTE == NULL) {
+
+        PRINT("[commitVA] Ending address does not correspond to a valid PTE\n");
+        return FALSE;
+
+    }
+
+    //
+    // Acquire starting PTE lock and set lockHeld boolean flag to true
+    //
+
     acquirePTELock(startPTE);
+
+    lockHeld = TRUE;
 
     for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
-        // invalid VA (not in range)
-        if (currPTE == NULL) {
+        //
+        // Only acquire lock if the currentPTE is the first PTE OR
+        // if current PTE's lock differs from the previous PTE's lock 
+        //
 
-            releasePTELock(startPTE);
-            PRINT_ERROR("[commitVA] Invalid PTE address - fatal error\n");
+        if (currPTE != startPTE) {
+
+            lockHeld = acquireOrHoldSubsequentPTELock(currPTE, currPTE - 1);
+
+        }
+ 
+        if (lockHeld == FALSE) {
+
+            PRINT_ERROR("[commitVA] unable to acquire lock - fatal error\n");
             return FALSE;
+
         }
         
         // make a shallow copy/"snapshot" of the PTE to edit and check
@@ -196,13 +226,14 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
         // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
         if (tempPTE.u1.hPTE.validBit == 1 || tempPTE.u1.tPTE.transitionBit == 1 || tempPTE.u1.pfPTE.permissions != NO_ACCESS) {
+
             PRINT("[commitVA] PTE is already valid, transition, or demand zero\n");
             continue;
+
         }
 
-
         //
-        // Below code to syncrhonize the increment of totalCommittedPages
+        // Below code to synchronize the increment of totalCommittedPages
         //
 
         LONG oldVal;
@@ -217,7 +248,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
             if (oldVal == totalMemoryPageLimit) {
 
                 // no remaining pages
-                releasePTELock(startPTE);
+                releasePTELock(currPTE);
 
                 PRINT("[commitVA] All commit charge used (no remaining pages) - unable to commit PTE\n");
                 return FALSE;
@@ -260,15 +291,19 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         //
 
         * (volatile PTE *) currPTE = tempPTE;
-            
+                            
     }
 
-    releasePTELock(startPTE);
+    //
+    // All PTE's have been updated - final PTE lock can be safely released
+    //
+
+    releasePTELock(endPTE);
+
 
     return TRUE;
 
 }
-
 
 
 BOOLEAN
@@ -411,27 +446,57 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
     PVOID endVA;
     PPTE endPTE;
     PPTE currPTE;
+    BOOLEAN lockHeld;
 
     startPTE = getPTE(startVA);
+
+    if (startPTE == NULL) {
+
+        PRINT("[commitVA] Starting address does not correspond to a valid PTE\n");
+        return FALSE;
+
+    }
 
     // inclusive (use <= as condition)
     endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
 
     endPTE = getPTE(endVA);
-    
+
+    if (endPTE == NULL) {
+
+        PRINT("[commitVA] Ending address does not correspond to a valid PTE\n");
+        return FALSE;
+        
+    }
+
+    //
+    // Acquire starting PTE lock and set lockHeld boolean flag to true
+    //
+
     acquirePTELock(startPTE);
+
+    lockHeld = TRUE;
 
     for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
-        // invalid VA (not in range)
-        if (currPTE == NULL) {
-            releasePTELock(startPTE);
+        //
+        // Only acquire lock if the currentPTE is the first PTE OR
+        // if current PTE's lock differs from the previous PTE's lock 
+        //
 
-            PRINT_ERROR("[protectVA] Invalid PTE address - fatal error\n")
+        if (currPTE != startPTE) {
+            
+            lockHeld = acquireOrHoldSubsequentPTELock(currPTE, currPTE - 1);
 
-            return FALSE;
         }
-        
+
+        if (lockHeld == FALSE) {
+
+            PRINT_ERROR("[commitVA] unable to acquire lock - fatal error\n");
+            return FALSE;
+
+        }
+
         // make a shallow copy/"snapshot" of the PTE to edit and check
         PTE tempPTE;
         tempPTE = *currPTE;
@@ -472,7 +537,12 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
         * (volatile PTE *) currPTE = tempPTE;
                 
     }
-    releasePTELock(startPTE);
+    
+    //
+    // All PTE's have been updated - final PTE lock can be safely released
+    //
+
+    releasePTELock(endPTE);
 
     return TRUE;
 
@@ -488,25 +558,60 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
     PPTE endPTE;
     PPTE currPTE;
     PVOID currVA;
-
+    BOOLEAN lockHeld;
+    BOOLEAN reprocessPTE;
+    
     startPTE = getPTE(startVA);
+
+    reprocessPTE = FALSE;
+
+    if (startPTE == NULL) {
+
+        PRINT("[commitVA] Starting address does not correspond to a valid PTE\n");
+        return FALSE;
+
+    }
 
     // inclusive (use <= as condition)
     endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
 
     endPTE = getPTE(endVA);
 
+    if (endPTE == NULL) {
+
+        PRINT("[commitVA] Ending address does not correspond to a valid PTE\n");
+        return FALSE;
+        
+    }
+
+    //
+    // Acquire starting PTE lock and set lockHeld boolean flag to true
+    //
+
     acquirePTELock(startPTE);
+
+    lockHeld = TRUE;
 
     for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
+        currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
 
-        if (currPTE == NULL) {
-            releasePTELock(startPTE);
+        //
+        // Only acquire lock if the currentPTE is the first PTE OR
+        // if current PTE's lock differs from the previous PTE's lock 
+        //
 
-            PRINT_ERROR("[decommitVA] Invalid PTE address - fatal error\n")
+        if (currPTE != startPTE && reprocessPTE == FALSE) {
+            
+            lockHeld = acquireOrHoldSubsequentPTELock(currPTE, currPTE - 1);
 
+        }
+
+        if (lockHeld == FALSE) {
+
+            PRINT_ERROR("[commitVA] unable to acquire lock - fatal error\n");
             return FALSE;
+
         }
 
 
@@ -515,14 +620,11 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
         tempPTE = *currPTE;
 
 
-        currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
-        // TODO - error check currVA?
-
-
         // check if PTE is already zeroed
         if (tempPTE.u1.ulongPTE == 0) {
 
             PRINT("VA is already decommitted\n");
+
             continue;
 
         }
@@ -536,19 +638,9 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
             PPFNdata currPFN;
             currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
 
-            // acquire lock and check if PTE has changed
+            // acquire PFN lock
             acquireJLock(&currPFN->lockBits);
 
-            if (tempPTE.u1.ulongPTE != currPTE->u1.ulongPTE) {
-
-                // if PTE has changed, release lock, set currPTE back one, and continue (so that it rereads)
-                releaseJLock(&currPFN->lockBits);
-                currPTE--;
-                PRINT("[decommitVA] PTE has since been changed from active state\n");
-
-                continue;
-
-            }
 
             #ifdef TESTING_VERIFY_ADDRESSES
 
@@ -558,20 +650,21 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
                     //
                     // This may occur if a thread attempts to decommit an address WHILE
-                    // another thread is ACTIVELY WRITING IT (between pagefault and actual writing out)
-                    // 
+                    // another thread is ACTIVELY WRITING IT (between pagefault and actual 
+                    // writing out in writeVA)
                     //
 
-                    ASSERT(FALSE);
-
                     PRINT("Another thread is currently between pagefault and write in writeVa\n");
+
                 } else {
                     PRINT_ERROR("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
 
                 }    
                 
             }
+            
             #endif
+
 
             // PRINT_ALWAYS("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
             // PRINT("decommitting (VA = 0x%llx) with contents %s\n", (ULONG_PTR) currVA, * (PCHAR *) currVA);
@@ -583,7 +676,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
             if (bResult != TRUE) {
 
-                PRINT_ERROR("[decommitVA] unable to decommit VA %llx\n", (ULONG_PTR) currVA);
+                PRINT_ERROR("[decommitVA] unable to decommit VA %llx - MapUserPhysical call failed\n", (ULONG_PTR) currVA);
             }
 
 
@@ -605,7 +698,6 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
             releaseJLock(&currPFN->lockBits);
 
 
-
         } 
         else if (tempPTE.u1.tPTE.transitionBit == 1) {                  // transition format
 
@@ -616,16 +708,26 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
             acquireJLock(&currPFN->lockBits);
 
-            // verify is still transition and pointed to by PTE index
+            // Verify the PTE is still in transition format and pointed to by PTE index
             if ( tempPTE.u1.ulongPTE != currPTE->u1.ulongPTE
             || (currPFN->statusBits != STANDBY && currPFN->statusBits != MODIFIED)
             || currPFN->PTEindex != (ULONG64) (currPTE - PTEarray) ) {
                 
                 releaseJLock(&currPFN->lockBits);
+
+                // releasePTELock(currPTE);
+
                 PRINT("[decommitVA] currPFN has changed from transition state\n");
 
-                // reprocess same PTE since it has since been changed
+                //
+                // Reprocess same PTE since it has since been changed
+                //
+
+                reprocessPTE = TRUE;
+
                 currPTE--;
+                // acquirePTELock(currPTE);
+
                 continue;
 
             }
@@ -669,7 +771,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
         }
         else if (tempPTE.u1.ulongPTE == 0) {                            // zero PTE
             
-            releasePTELock(startPTE);
+            releasePTELock(currPTE);
             PRINT_ERROR("[decommitVA] already decommitted\n");
             return TRUE;
 
@@ -682,7 +784,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
         } else {
 
-            releasePTELock(startPTE);
+            releasePTELock(currPTE);
             PRINT_ERROR("[decommitVA] bookkeeping error - no committed pages\n");
             return FALSE;
 
@@ -692,9 +794,14 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
         memset(&tempPTE, 0, sizeof(PTE));
 
         * (volatile PTE *) currPTE = tempPTE;
+                
     }
 
-    releasePTELock(startPTE);
+    //
+    // All PTE's have been updated - final PTE lock can be safely released
+    //
+
+    releasePTELock(endPTE);
 
     return TRUE;
 

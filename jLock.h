@@ -27,8 +27,24 @@ tryAcquireJLock(volatile PLONG lock);
 
 
 VOID
+initPTELocks(ULONG_PTR numPages);
+
+
+VOID
+freePTELocks(PCRITICAL_SECTION LockArray, ULONG_PTR virtualMemPages);
+
+
+ULONG_PTR
+getLockIndex(PPTE currPTE);
+
+
+VOID
 acquirePTELock(PPTE currPTE);
 
 
 VOID
 releasePTELock(PPTE currPTE);
+
+
+BOOLEAN
+acquireOrHoldSubsequentPTELock(PPTE currPTE, PPTE prevPTE);

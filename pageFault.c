@@ -569,7 +569,7 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
     if (!checkPTEpermissions(dZeroRWEpermissions, RWEpermissions)) {
 
-        PRINT_ERROR("Invalid permissions\n");
+        PRINT("[dzPageFault] Invalid permissions\n");
         return ACCESS_VIOLATION;
 
     } 

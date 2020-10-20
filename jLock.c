@@ -14,12 +14,14 @@ acquireJLock(volatile PLONG lock)
     }
 }
 
+
 VOID
 releaseJLock(volatile PLONG lock)
 {
     *lock = 0;
     return;
 }
+
 
 BOOL
 tryAcquireJLock(volatile PLONG lock)
@@ -32,15 +34,146 @@ tryAcquireJLock(volatile PLONG lock)
     }
 }
 
-VOID
-acquirePTELock(PPTE currPTE) {
 
-    EnterCriticalSection(&PTELock);
+VOID
+initPTELocks(ULONG_PTR virtualMemPages)
+{
+
+    ULONG_PTR numLocks;
+    numLocks = virtualMemPages / PAGES_PER_LOCK;
+
+    // 
+    // Allocate a lock array corresponding to PTEs in pagetable
+    //
+
+    PTELockArray = VirtualAlloc(NULL, numLocks * sizeof(CRITICAL_SECTION), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+    if (PTELockArray == NULL) {
+
+        PRINT_ERROR("Unable to allocate for PTE Locks\n");
+        exit(-1);
+
+    }
+
+    for (int i = 0; i <= numLocks; i++) {
+
+        InitializeCriticalSection(&PTELockArray[i]);
+
+    }
+
 }
 
-VOID
-releasePTELock(PPTE currPTE) {
 
-    LeaveCriticalSection(&PTELock);
+VOID
+freePTELocks(PCRITICAL_SECTION LockArray, ULONG_PTR virtualMemPages)
+{
+    
+    ULONG_PTR numLocks;
+
+    if (PTELockArray == NULL) {
+
+        PRINT_ERROR("Lock array is NULL - already freed\n");
+        return;
+
+    }
+
+    numLocks = virtualMemPages / PAGES_PER_LOCK;
+
+    for (int i = 0; i <= numLocks; i++) {
+
+        DeleteCriticalSection(&PTELockArray[i]);
+
+    }
+
+    VirtualFree(LockArray, 0, MEM_RELEASE);
+    
+}
+
+
+ULONG_PTR
+getLockIndex(PPTE currPTE) 
+{
+
+    ULONG_PTR PTEIndex;
+
+    PTEIndex = currPTE - PTEarray;
+
+    return PTEIndex / PAGES_PER_LOCK;
+
+}
+
+
+VOID
+acquirePTELock(PPTE currPTE) 
+{
+
+    ULONG_PTR lockIndex;
+
+    lockIndex = getLockIndex(currPTE);
+
+    EnterCriticalSection(&PTELockArray[lockIndex]);
+
+    // EnterCriticalSection(&PTELock);
+
+}
+
+
+VOID
+releasePTELock(PPTE currPTE) 
+{
+
+    ULONG_PTR lockIndex;
+
+    lockIndex = getLockIndex(currPTE);
+    LeaveCriticalSection(&PTELockArray[lockIndex]);
+    
+    // LeaveCriticalSection(&PTELock);
+
+}
+
+
+//
+// If PTE lock index remains the same, do nothing
+// else, if switches, release old and acquire new
+//
+
+
+BOOLEAN
+acquireOrHoldSubsequentPTELock(PPTE currPTE, PPTE prevPTE)
+{
+
+
+    ULONG_PTR currLockIndex;
+    ULONG_PTR prevLockIndex;
+
+
+    if (currPTE == NULL || prevPTE == NULL) {
+
+        PRINT_ERROR("[acquireOrHoldSubsequentPTELock] Invalid PTE params\n");
+        return FALSE;
+
+    }
+
+    currLockIndex = getLockIndex(currPTE);
+
+    prevLockIndex = getLockIndex(prevPTE);
+
+    //
+    // If lock index remains constant, return true without switching
+    // Otherwise, leave the prev critical section and enter the current
+    // critical section
+    //
+
+    if (currLockIndex == prevLockIndex) {
+
+        return TRUE;
+
+    } else {
+
+        LeaveCriticalSection(&PTELockArray[prevLockIndex]);
+        EnterCriticalSection(&PTELockArray[currLockIndex]);
+        return TRUE;
+
+    }
 
 }

@@ -62,6 +62,7 @@ copyPage(ULONG_PTR dest, ULONG_PTR src)
     PVANode destVANode;
 
     sourceVANode = dequeueLockedVA(&pageTradeVAListHead);
+    destVANode = dequeueLockedVA(&pageTradeVAListHead);
 
     while (sourceVANode == NULL || destVANode == NULL) {
         
@@ -80,6 +81,7 @@ copyPage(ULONG_PTR dest, ULONG_PTR src)
     }
 
     sourceVA = sourceVANode->VA;
+    destVA = destVANode->VA;
 
     // map given page to the pageTradeSoureVA
     if (!MapUserPhysicalPages(sourceVA, 1, &src)) {

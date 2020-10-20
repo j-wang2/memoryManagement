@@ -26,9 +26,6 @@ void* leafVABlockEnd;                   // ending address of virtual memory bloc
 PPFNdata PFNarray;                      // starting address of PFN metadata array
 PPTE PTEarray;                          // starting address of page table
 
-void* pageTradeDestVA;                  // specific VA used for page trading destination
-void* pageTradeSourceVA;                // specific VA used for page trading source
-
 LONG totalCommittedPages;               // count of committed pages (initialized to zero)
 ULONG_PTR totalMemoryPageLimit = NUM_PAGES + (PAGEFILE_SIZE >> PAGE_SHIFT);    // limit of committed pages (memory block + pagefile space)
 
@@ -64,7 +61,7 @@ HANDLE wakeModifiedWriterHandle;
 
 ULONG_PTR numPagesReturned;
 
-
+ULONG_PTR virtualMemPages;
 
 
 BOOL
@@ -1409,6 +1406,7 @@ initHandles()
     }
 }
 
+
 BOOLEAN
 closeHandles()
 {
@@ -1452,7 +1450,6 @@ initializeVirtualMemory()
     numPagesReturned = allocatePhysPages(NUM_PAGES, aPFNs);
 
     // to achieve a greater VM address range than PM would otherwise allow
-    ULONG_PTR virtualMemPages;
     virtualMemPages = numPagesReturned * VM_MULTIPLIER;
 
 
@@ -1463,7 +1460,7 @@ initializeVirtualMemory()
 
     initVAList(&readPFVAListHead, NUM_THREADS + 3);
 
-    initVAList(&pageTradeVAList, 2*NUM_THREADS + 3);
+    initVAList(&pageTradeVAListHead, 2*NUM_THREADS + 3);
 
     initEventList(&readInProgEventListHead, NUM_THREADS + 3);
 
@@ -1485,10 +1482,10 @@ initializeVirtualMemory()
     // create PageFile section of memory
     initPageFile(PAGEFILE_SIZE);
 
+    // initialize availablePagesLow & wakeModifiedWriter handles
     initHandles();
 
     initPTELocks(virtualMemPages);
-
 
     return numPagesReturned;
 
@@ -1505,19 +1502,17 @@ freeVirtualMemory()
     VirtualFree(PTEarray, 0, MEM_RELEASE);
     VirtualFree(pageFileVABlock, 0, MEM_RELEASE);
 
-    VirtualFree(pageTradeDestVA, 0, MEM_RELEASE);
-    VirtualFree(pageTradeSourceVA, 0, MEM_RELEASE);
-
     freeEventList(&readInProgEventListHead);
 
     freeVAList(&zeroVAListHead);
     freeVAList(&writeVAListHead);
     freeVAList(&readPFVAListHead);
+    freeVAList(&pageTradeVAListHead);
 
-
+    // close availablePagesLow & wakeModifiedWriter handles
     closeHandles();
 
-    VirtualFree(PTELockArray, 0, MEM_RELEASE);
+    freePTELocks(PTELockArray, virtualMemPages);
 
 }
 
