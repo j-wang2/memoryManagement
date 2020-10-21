@@ -147,6 +147,7 @@ dequeueVA(PlistData listHead);
 PVANode
 dequeueLockedVA(PlistData listHead);
 
+
 /*
  * enqueueVA: wrapper function for enqueue
  *  - increments count of VA list
@@ -157,12 +158,36 @@ VOID
 enqueueVA(PlistData listHead, PVANode VANode);
 
 
+/*
+ * dequeueEvent: wrapper function for dequeue
+ *  - dequeues an event node from listhead
+ *  - decrements count of event list
+ */
 PeventNode
 dequeueEvent(PlistData listHead);
 
+
+/*
+ * dequeueLockedEvent: SYNCHRONIZED wrapper function for dequeueEvent
+ *  - peeks at top item and acquires lock
+ *  - acquires and releases listhead lock
+ * 
+ * Returns PeventNode:
+ *  - NULL if list empty
+ *  - eventnode on success
+ */
 PeventNode
 dequeueLockedEvent(PlistData listHead);
 
+
+/*
+ * enqueueEvent: wrapper function for enqueue
+ *  - enqueues an event node to listhead
+ *  - increments count of event list
+ *  - acquires and releases listhead lock
+ * 
+ * No return value
+ */
 VOID
 enqueueEvent(PlistData listHead, PeventNode eventNode);
 

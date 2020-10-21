@@ -191,7 +191,7 @@ extern void* leafVABlockEnd;               // ending address of memory block
 extern PPFNdata PFNarray;                  // starting address of PFN array
 extern PPTE PTEarray;                      // starting address of page table
 
-extern LONG totalCommittedPages;      // count of committed pages (initialized to zero)
+extern LONG totalCommittedPages;           // count of committed pages (initialized to zero)
 extern ULONG_PTR totalMemoryPageLimit;     // limit of committed pages (memory block + pagefile space)
 
 
@@ -237,66 +237,38 @@ extern HANDLE wakeModifiedWriterHandle;
 
 
 
-/*****************************************************************
+// /*****************************************************************
 
-    * ADAPTED FROM https://docs.microsoft.com/en-us/windows/win32/memory/awe-example *
+//     * ADAPTED FROM https://docs.microsoft.com/en-us/windows/win32/memory/awe-example *
 
-   LoggedSetLockPagesPrivilege: a function to obtain or
-   release the privilege of locking physical pages.
+//    LoggedSetLockPagesPrivilege: a function to obtain or
+//    release the privilege of locking physical pages.
 
-   Inputs:
+//    Inputs:
 
-       HANDLE hProcess: Handle for the process for which the
-       privilege is needed
+//        HANDLE hProcess: Handle for the process for which the
+//        privilege is needed
 
-       BOOL bEnable: Enable (TRUE) or disable?
+//        BOOL bEnable: Enable (TRUE) or disable?
 
-   Return value: TRUE indicates success, FALSE failure.
-
-
-*****************************************************************/
-BOOL
-LoggedSetLockPagesPrivilege ( HANDLE hProcess,
-                              BOOL bEnable);
+//    Return value: TRUE indicates success, FALSE failure.
 
 
-/*
- * getPrivilege: wrapper function for getting page mapping privilege
- * 
- * Returns BOOLEAN:
- *  - TRUE on success
- *  - FALSE on failure
- */
-BOOL
-getPrivilege ();
+// *****************************************************************/
+// BOOL
+// LoggedSetLockPagesPrivilege ( HANDLE hProcess,
+//                               BOOL bEnable);
 
 
-/*
- * initVABlock: initializes the block of memory to be managed
- *  - 
- * 
- * Returns PVOID:
- *  - starting VA
- * 
- */
-VOID
-initVABlock(ULONG_PTR numPages);
-
-
-VOID
-initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages);
-
-
-VOID
-initPTEarray(ULONG_PTR numPages);
-
-
-VOID
-initPageFile(ULONG_PTR diskSize);
-
-
-ULONG_PTR
-allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs);
+// /*
+//  * getPrivilege: wrapper function for getting page mapping privilege
+//  * 
+//  * Returns BOOLEAN:
+//  *  - TRUE on success
+//  *  - FALSE on failure
+//  */
+// BOOL
+// getPrivilege ();
 
 
 BOOLEAN

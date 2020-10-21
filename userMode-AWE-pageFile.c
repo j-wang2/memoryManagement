@@ -1407,10 +1407,11 @@ initHandles()
 }
 
 
-BOOLEAN
+BOOL
 closeHandles()
 {
-    BOOL bRes = CloseHandle(availablePagesLowHandle);       // TODO - check ret val and abstract
+    BOOL bRes;
+    bRes = CloseHandle(availablePagesLowHandle);       // TODO - check ret val and abstract
 
     if (bRes != TRUE) {
 
@@ -1425,7 +1426,7 @@ closeHandles()
         
     }
 
-    return bRes;
+    return (BOOLEAN)bRes;
 }
 
 

@@ -64,16 +64,17 @@ initPTELocks(ULONG_PTR virtualMemPages)
 }
 
 
-VOID
+BOOLEAN
 freePTELocks(PCRITICAL_SECTION LockArray, ULONG_PTR virtualMemPages)
 {
     
     ULONG_PTR numLocks;
+    BOOL bRes;
 
     if (PTELockArray == NULL) {
 
         PRINT_ERROR("Lock array is NULL - already freed\n");
-        return;
+        return FALSE;
 
     }
 
@@ -85,8 +86,16 @@ freePTELocks(PCRITICAL_SECTION LockArray, ULONG_PTR virtualMemPages)
 
     }
 
-    VirtualFree(LockArray, 0, MEM_RELEASE);
+    bRes = VirtualFree(LockArray, 0, MEM_RELEASE);
+
+    if (bRes == FALSE) {
+      
+        PRINT_ERROR("Unable to free lock array\n");
+        return FALSE;
+  
+    }
     
+    return TRUE;
 }
 
 
@@ -130,12 +139,6 @@ releasePTELock(PPTE currPTE)
     // LeaveCriticalSection(&PTELock);
 
 }
-
-
-//
-// If PTE lock index remains the same, do nothing
-// else, if switches, release old and acquire new
-//
 
 
 BOOLEAN

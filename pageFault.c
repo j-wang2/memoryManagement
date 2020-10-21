@@ -814,9 +814,47 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
     if (status == NO_AVAILABLE_PAGES) {
 
-        HANDLE pageEventHandles[] = {zeroListHead.newPagesEvent, freeListHead.newPagesEvent, standbyListHead.newPagesEvent};
+        ULONG_PTR availablePages;
+        availablePages = 0;
 
-        WaitForMultipleObjects(STANDBY + 1, pageEventHandles, TRUE, INFINITE);
+        //
+        // Acquire all list locks to verify no pages are available
+        //
+
+        for (int i = 0; i < STANDBY + 1; i++) {
+
+            EnterCriticalSection(&listHeads[i].lock);
+            availablePages += listHeads[i].count;
+            
+        }
+
+        if (availablePages == 0) {
+
+            //
+            // If all counts are zero, reset events and leave
+            // critical sections
+            //
+
+            for (int i = 0; i < STANDBY + 1; i++) {
+
+                ResetEvent(listHeads[i].newPagesEvent);
+
+                LeaveCriticalSection(&listHeads[i].lock);
+
+            }
+
+            HANDLE pageEventHandles[] = {zeroListHead.newPagesEvent, freeListHead.newPagesEvent, standbyListHead.newPagesEvent};
+
+            WaitForMultipleObjects(STANDBY + 1, pageEventHandles, TRUE, INFINITE);
+
+        } else {
+
+            for (int i = 0; i < STANDBY + 1; i++) {
+
+                LeaveCriticalSection(&listHeads[i].lock);
+
+            } 
+        }
 
     }
     
