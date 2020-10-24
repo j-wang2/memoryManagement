@@ -79,13 +79,14 @@ typedef struct _hardwarePTE{
 typedef struct _transitionPTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for tPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 1 for dzPTE
-    ULONG64 permissions: PERMISSIONS_BITS;                    // read if 0, write if 1
+    ULONG64 permissions: PERMISSIONS_BITS;
     ULONG64 PFN: PFN_BITS;
 } transitionPTE, *PtransitionPTE;
 
 typedef struct _pageFilePTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
+    ULONG64 decommitBit: 1;
     ULONG64 permissions: PERMISSIONS_BITS;
     ULONG64 pageFileIndex: PAGEFILE_BITS;
 } pageFilePTE, *PpageFilePTE;
@@ -93,6 +94,7 @@ typedef struct _pageFilePTE{
 typedef struct _demandZeroPTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
+    ULONG64 decommitBit: 1;
     ULONG64 permissions: PERMISSIONS_BITS;
     ULONG64 pageFileIndex: PAGEFILE_BITS;   // PF index MUST be INVALID_PAGEFILE_INDEX( MAXULONG_PTR) for dzPTE
 } demandZeroPTE, *PdemandZeroPTE;

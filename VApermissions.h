@@ -90,4 +90,7 @@ trimVA(void* virtualAddress);
 BOOLEAN
 decommitVA (PVOID startVA, ULONG_PTR commitSize);
 
+BOOLEAN
+commitPages (ULONG_PTR numPages);
+
 #endif

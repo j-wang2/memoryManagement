@@ -157,6 +157,10 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
         newPage = getPage(FALSE);
     }
 
+    if (newPage == NULL) {
+        DebugBreak();
+    }
+
     //
     // Todo- check if newpage isnull again (as in pagefault)
     //
@@ -261,8 +265,6 @@ tradeVA(PVOID virtualAddress)
             return FALSE;
         }
 
-        // pageFault(virtualAddress, READ_ONLY);           // todo - check ret value
-        accessVA(virtualAddress, READ_ONLY);
 
         if (originalValidBit) {
 
@@ -276,9 +278,13 @@ tradeVA(PVOID virtualAddress)
     }
 
     else {
-        // no page associated
+
+        //
+        // Current VA/PTE is not mapped to a page
+        //
+        
         releasePTELock(currPTE);
-        PRINT("[tradeVA] Address not mapped to page\n");    // TODO - is this an error
+        PRINT("[tradeVA] Address not mapped to page\n");
         return FALSE;
     }
 }

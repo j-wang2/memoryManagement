@@ -928,8 +928,6 @@ trimValidPTEs()
 
         if (currPTE->u1.hPTE.validBit == 1) {
 
-            // todo- add assert for pfn??
-
             //
             // If aging bit remains set
             //
@@ -1017,7 +1015,7 @@ initListHead(PlistData headData)
     headData->count = 0;
 
     HANDLE pagesCreatedHandle;
-    pagesCreatedHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
+    pagesCreatedHandle = CreateEvent(NULL, FALSE, TRUE, NULL);
 
     if (pagesCreatedHandle == INVALID_HANDLE_VALUE) {
         PRINT_ERROR("failed to create event handle\n");
@@ -1411,14 +1409,14 @@ BOOL
 closeHandles()
 {
     BOOL bRes;
-    bRes = CloseHandle(availablePagesLowHandle);       // TODO - check ret val and abstract
+    bRes = CloseHandle(availablePagesLowHandle);
 
     if (bRes != TRUE) {
 
         PRINT_ERROR("Unable to close handle\n");
 
     }
-    bRes = CloseHandle(wakeModifiedWriterHandle);       // TODO - check ret val and abstract
+    bRes = CloseHandle(wakeModifiedWriterHandle);
 
     if (bRes != TRUE) {
 

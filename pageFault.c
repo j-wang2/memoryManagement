@@ -4,6 +4,7 @@
 #include "PTEpermissions.h"
 #include "jLock.h"
 #include "pageFile.h"
+#include "VADNodes.c"
 
 // Array used to convert PTEpermissions enum to standard windows permissions
 DWORD windowsPermissions[] = { PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE };
@@ -678,34 +679,36 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
 
 
-// faultStatus
-// checkVADPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
-// {
+faultStatus
+checkVADPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
+{
 
-//     // snapPTE should be zeroed out (to even get to this function)
-//     PTE newPTE;
-//     newPTE.u1.ulongPTE = 0;
+    ASSERT(masterPTE->u1.dzPTE.decommitBit == 0);
 
-//     PVADNode currVAD;
-//     currVAD = getVAD(virtualAddress);
+    // snapPTE should be zeroed out (to even get to this function)
+    PTE newPTE;
+    newPTE.u1.ulongPTE = 0;
 
-//     if (currVAD == NULL) {
-//         PRINT_ERROR ("not in VAD\n");
-//         return ACCESS_VIOLATION;
-//     }
+    PVADNode currVAD;
+    currVAD = getVAD(virtualAddress);
 
-//     // get permissions from the VAD
-//     PTEpermissions VADpermissions;
-//     VADpermissions = currVAD->permissions;
+    if (currVAD == NULL) {
+        PRINT ("not in VAD\n");
+        return ACCESS_VIOLATION;
+    }
 
-//     // transfer permissions
-//     transferPTEpermissions(&snapPTE, VADpermissions);
+    // get permissions from the VAD
+    PTEpermissions VADpermissions;
+    VADpermissions = currVAD->permissions;
+
+    // transfer permissions
+    transferPTEpermissions(&snapPTE, VADpermissions);
 
 
-//     // TODO: make sure this checks out
-//     return demandZeroPageFault(virtualAddress, RWEpermissions, snapPTE, masterPTE);
+    // TODO: make sure this checks out
+    return demandZeroPageFault(virtualAddress, RWEpermissions, snapPTE, masterPTE);
 
-// }
+}
 
 
 
@@ -778,9 +781,15 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         status = pageFilePageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);  
 
     }
-    else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS) {                // DEMAND ZERO STATE PTE  
+    else if (oldPTE.u1.dzPTE.permissions != NO_ACCESS) {                // DEMAND ZERO STATE PTE  
 
         status = demandZeroPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
+
+    }
+    else if (oldPTE.u1.dzPTE.decommitBit == 1) {
+
+        PRINT("PTE has been decommitted\n");
+        status = ACCESS_VIOLATION;
 
     }
     else if (oldPTE.u1.ulongPTE == 0) {                                 // ZERO STATE PTE
