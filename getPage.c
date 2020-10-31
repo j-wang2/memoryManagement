@@ -1,6 +1,7 @@
 #include "userMode-AWE-pageFile.h"
 #include "enqueue-dequeue.h"
 #include "jLock.h"
+#include "PTEpermissions.h"
 
 PPFNdata
 getZeroPage(BOOLEAN returnLocked)
@@ -16,7 +17,7 @@ getZeroPage(BOOLEAN returnLocked)
             return NULL;
         }
 
-        returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         return returnPFN;        
 
@@ -87,18 +88,18 @@ getStandbyPage(BOOLEAN returnLocked)
         // if page is not already in pagefile, it MUST be a zero page 
         // (i.e. faulted into active but never written, then trimmed to standby)
         // Therefore, the PTE can be set to demand zero 
-        if (returnPFN->pageFileOffset == INVALID_PAGEFILE_INDEX) {
+        if (returnPFN->pageFileOffset == INVALID_BITARRAY_INDEX) {
 
             // copy permissions to dz format PTE
             newPTE.u1.dzPTE.permissions = oldPTE.u1.tPTE.permissions;
 
             // put PF index into dz format PTE
-            newPTE.u1.dzPTE.pageFileIndex = INVALID_PAGEFILE_INDEX;
+            newPTE.u1.dzPTE.pageFileIndex = INVALID_BITARRAY_INDEX;
 
             returnPFN->statusBits = FREE;
 
             // copy newPTE back into currPTE
-            * (volatile PTE *) currPTE = newPTE;
+            writePTE(currPTE, newPTE);
         
             return returnPFN;
 
@@ -113,7 +114,7 @@ getStandbyPage(BOOLEAN returnLocked)
         returnPFN->statusBits = FREE;
 
         // copy newPTE back into currPTE
-        * (volatile PTE *) currPTE = newPTE;
+        writePTE(currPTE, newPTE);
        
         //
         // release PFN lock once PTE is written out (if returnLocked is FALSE)
@@ -152,7 +153,7 @@ getPage(BOOLEAN returnLocked)
         zeroPage(PFN);
 
         // set PF offset to our "null" value in the PFN metadata
-        returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         PRINT("[getPage] Allocated PFN from standby list\n");
 
@@ -166,7 +167,7 @@ getPage(BOOLEAN returnLocked)
     if (returnPFN != NULL) {
 
         // set PF offset to our "null" value in the PFN metadata
-        returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         PRINT("[getPage] Allocated PFN from zero list\n");
 
@@ -186,7 +187,7 @@ getPage(BOOLEAN returnLocked)
         zeroPage(PFN);
 
         // set PF offset to our "null" value in the PFN metadata
-        returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         PRINT("[getPage] Allocated PFN from free list\n");
 
@@ -204,7 +205,7 @@ getPage(BOOLEAN returnLocked)
         zeroPage(PFN);
 
         // set PF offset to our "null" value in the PFN metadata
-        returnPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         PRINT("[getPage] Allocated PFN from standby list\n");
 
@@ -233,7 +234,7 @@ getPageAlways(BOOLEAN returnLocked)
 
             HANDLE pageEventHandles[] = {zeroListHead.newPagesEvent, freeListHead.newPagesEvent, standbyListHead.newPagesEvent};
 
-            WaitForMultipleObjects(STANDBY + 1, pageEventHandles, TRUE, INFINITE);
+            WaitForMultipleObjects(STANDBY + 1, pageEventHandles, FALSE, INFINITE);
 
             continue;
 

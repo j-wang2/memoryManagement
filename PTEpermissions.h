@@ -3,6 +3,10 @@
 
 // #include "userMode-AWE-pageFile.h"
 
+VOID
+writePTE(PPTE dest, PTE value);
+
+
 /*
  * getPTE: function to find corresponding PTE from a given VA
  * 

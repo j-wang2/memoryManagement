@@ -22,7 +22,7 @@
 
 #define MULTIPLE_MAPPINGS                           // enables multiple mappings
 #define CONTINUOUS_FAULT_TEST
-#define TRADE_PAGES
+// #define TRADE_PAGES
 
 
 
@@ -30,14 +30,14 @@
 // #define NUM_PAGES 30
 #define NUM_PAGES 512
 // #define NUM_PAGES 2048
-// #define NUM_PAGES 6400000
+// #define NUM_PAGES 64000
 
-#define VM_MULTIPLIER 10                          // VM space is this many times larger than num physical pages successfully allocated
+#define VM_MULTIPLIER 1                          // VM space is this many times larger than num physical pages successfully allocated
 
 
 /********** PTE bit macros *************/
 #define PERMISSIONS_BITS 3                          // bits in non-valid PTE formats reserved for permissions
-#define PTE_INDEX_BITS 9                            // log2(NUM_PAGES)
+#define PTE_INDEX_BITS 12                            // log2(NUM_PAGES)
 #define PFN_BITS 40                                 // number of bits to store PFN index
 
 
@@ -50,7 +50,7 @@
 #define PAGEFILE_PAGES 512                          // capacity of pagefile pages (+ NUM_PAGES for total memory)
 #define PAGEFILE_SIZE PAGEFILE_PAGES*PAGE_SIZE      // total pagefile size 
 #define PAGEFILE_BITS 20                            // actually 2^19 currently
-#define INVALID_PAGEFILE_INDEX 0xfffff              // 20 bits (MUST CORRESPOND TO PAGEFILE BITS)
+#define INVALID_BITARRAY_INDEX 0xfffff              // 20 bits (MUST CORRESPOND TO PAGEFILE BITS)
 
 
 #define PAGES_PER_LOCK 64
@@ -61,7 +61,7 @@
 
 
 /***************** print macros ******************/
-#define PRINT(fmt, ...) if (debugMode == TRUE) { printf(fmt, __VA_ARGS__); }                // verify this works
+#define PRINT(fmt, ...) if (debugMode == TRUE) { printf(fmt, __VA_ARGS__); }
 #define PRINT_ERROR(fmt, ...) if (debugMode == TRUE) { fprintf(stderr, fmt, __VA_ARGS__); } ASSERT(FALSE); 
 #define PRINT_ALWAYS(fmt, ...) printf(fmt, __VA_ARGS__)
 
@@ -78,14 +78,14 @@ typedef struct _hardwarePTE{
 
 typedef struct _transitionPTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for tPTE
-    ULONG64 transitionBit: 1;       // transition bit MUST be 1 for dzPTE
+    ULONG64 transitionBit: 1;       // transition bit MUST be set for tPTE
     ULONG64 permissions: PERMISSIONS_BITS;
     ULONG64 PFN: PFN_BITS;
 } transitionPTE, *PtransitionPTE;
 
 typedef struct _pageFilePTE{
-    ULONG64 validBit: 1;            // valid bit MUST be 0 for dzPTE
-    ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
+    ULONG64 validBit: 1;            // valid bit MUST be 0 for pfPTE
+    ULONG64 transitionBit: 1;       // transition bit MUST be 0 for pfPTE
     ULONG64 decommitBit: 1;
     ULONG64 permissions: PERMISSIONS_BITS;
     ULONG64 pageFileIndex: PAGEFILE_BITS;
@@ -96,7 +96,7 @@ typedef struct _demandZeroPTE{
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
     ULONG64 decommitBit: 1;
     ULONG64 permissions: PERMISSIONS_BITS;
-    ULONG64 pageFileIndex: PAGEFILE_BITS;   // PF index MUST be INVALID_PAGEFILE_INDEX( MAXULONG_PTR) for dzPTE
+    ULONG64 pageFileIndex: PAGEFILE_BITS;   // PF index MUST be INVALID_BITARRAY_INDEX( MAXULONG_PTR) for dzPTE
 } demandZeroPTE, *PdemandZeroPTE;
 
 typedef ULONG64 ulongPTE;
@@ -231,6 +231,10 @@ extern PCRITICAL_SECTION PTELockArray;      // finer-grained lock array for page
 extern HANDLE availablePagesLowHandle;
 
 extern HANDLE wakeModifiedWriterHandle;
+
+extern PULONG_PTR VADBitArray;
+
+extern ULONG_PTR virtualMemPages;
 
 
 

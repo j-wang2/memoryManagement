@@ -4,7 +4,7 @@
 #include "PTEpermissions.h"
 #include "jLock.h"
 #include "pageFile.h"
-#include "VADNodes.c"
+#include "VADNodes.h"
 
 // Array used to convert PTEpermissions enum to standard windows permissions
 DWORD windowsPermissions[] = { PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE };
@@ -60,7 +60,7 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
             clearPFBitIndex(PFN->pageFileOffset);
 
             // clear pagefile pointer out of PFN
-            PFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+            PFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         }
 
@@ -72,7 +72,7 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 
         releaseJLock(&PFN->lockBits);
 
-        * (volatile PTE *) masterPTE = snapPTE;
+        writePTE(masterPTE, snapPTE);
 
     }
 
@@ -207,7 +207,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
 
             // clear pagefile pointer out of PFN
-            transitionPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+            transitionPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         }
 
@@ -260,7 +260,8 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     newPTE.u1.hPTE.agingBit = 0;
 
 
-    * (volatile PTE *) masterPTE = newPTE;
+    writePTE(masterPTE, newPTE);
+    
     
     // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a brief lack of permissions protection
 
@@ -392,7 +393,8 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     pageNum = freedPFN - PFNarray;
     newPTE.u1.tPTE.PFN = pageNum;
 
-    * (volatile PTE *) masterPTE = newPTE;
+    writePTE(masterPTE, newPTE);
+    
     
     //
     // Release PTE lock (has been held since call)
@@ -490,7 +492,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         clearPFBitIndex(snapPTE.u1.pfPTE.pageFileIndex);
 
         // clear pagefile pointer out of PFN
-        freedPFN->pageFileOffset = INVALID_PAGEFILE_INDEX;
+        freedPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
     }
 
@@ -502,7 +504,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     newPTE.u1.hPTE.PFN = pageNum;
     
     // compiler writes out as indivisible store
-    * (volatile PTE *) masterPTE = newPTE;
+    writePTE(masterPTE, newPTE);
 
     DWORD oldPermissions;
 
@@ -560,8 +562,7 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     PTE newPTE;
     PTEpermissions dZeroRWEpermissions;
     DWORD oldPermissions;
-    BOOL bresult;
-
+    BOOL bresult;   
 
     newPTE.u1.ulongPTE = 0;
 
@@ -607,7 +608,6 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
     }   
 
-
     // set PFN status to active
     freedPFN->statusBits = ACTIVE;
 
@@ -646,7 +646,7 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     // Compiler writes out new PTE indivisibly (although PTE lock is held anyway)
     //
 
-    * (volatile PTE *) masterPTE = newPTE;
+    writePTE(masterPTE, newPTE);
     
     //
     // Note: Without PTE locking/synchronization, the time between MapUserPhysicalPages
@@ -685,27 +685,21 @@ checkVADPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     ASSERT(masterPTE->u1.dzPTE.decommitBit == 0);
 
-    // snapPTE should be zeroed out (to even get to this function)
-    PTE newPTE;
-    newPTE.u1.ulongPTE = 0;
-
     PVADNode currVAD;
     currVAD = getVAD(virtualAddress);
 
-    if (currVAD == NULL) {
+    if (currVAD == NULL || currVAD->commitBit == 0) {
         PRINT ("not in VAD\n");
         return ACCESS_VIOLATION;
     }
+
 
     // get permissions from the VAD
     PTEpermissions VADpermissions;
     VADpermissions = currVAD->permissions;
 
-    // transfer permissions
-    transferPTEpermissions(&snapPTE, VADpermissions);
+    snapPTE.u1.dzPTE.permissions = VADpermissions;
 
-
-    // TODO: make sure this checks out
     return demandZeroPageFault(virtualAddress, RWEpermissions, snapPTE, masterPTE);
 
 }
@@ -772,7 +766,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
     }
     else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS &&                // PAGEFILE STATE PTE
-             oldPTE.u1.pfPTE.pageFileIndex != INVALID_PAGEFILE_INDEX) { 
+             oldPTE.u1.pfPTE.pageFileIndex != INVALID_BITARRAY_INDEX) { 
 
         //
         // Note: PTE lock released pre-filesystem read and re-acquired post read
@@ -794,14 +788,9 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     }
     else if (oldPTE.u1.ulongPTE == 0) {                                 // ZERO STATE PTE
 
-        // TODO (future): may need to check if vad is mem commit and bring in permissions
-        // status = checkVADPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
-
-        PRINT("access violation - PTE is zero\n");
-        status = ACCESS_VIOLATION;
+        status = checkVADPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
 
     }
-
     else {
 
         PRINT_ERROR("ERROR - not in any recognized PTE state\n");
@@ -844,9 +833,16 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
             // critical sections
             //
 
+            BOOL bRes;
+
+
             for (int i = 0; i < STANDBY + 1; i++) {
 
-                ResetEvent(listHeads[i].newPagesEvent);
+                bRes = ResetEvent(listHeads[i].newPagesEvent);
+
+                if (bRes != TRUE) {
+                    PRINT_ERROR("[dequeueLockedEvent] unable to reset event\n");
+                }
 
                 LeaveCriticalSection(&listHeads[i].lock);
 
@@ -854,7 +850,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
             HANDLE pageEventHandles[] = {zeroListHead.newPagesEvent, freeListHead.newPagesEvent, standbyListHead.newPagesEvent};
 
-            WaitForMultipleObjects(STANDBY + 1, pageEventHandles, TRUE, INFINITE);
+            WaitForMultipleObjects(STANDBY + 1, pageEventHandles, FALSE, INFINITE);
 
         } else {
 

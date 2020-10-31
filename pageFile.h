@@ -9,7 +9,7 @@
  * 
  * Returns ULONG_PTR:
  *  - bitIndex on success
- *  - INVALID_PAGEFILE_INDEX on failure ( no available space)
+ *  - INVALID_BITARRAY_INDEX on failure ( no available space)
  */
 ULONG_PTR
 setPFBitIndex();
@@ -18,7 +18,7 @@ setPFBitIndex();
 /* 
  * clearPFBitIndex: function to clear (change from 1 to 0) bit index of pageFile bit array
  *  - denotes that PF offset is clear and can be used
- *  - if called with INVALID_PAGEFILE_INDEX, simply returns
+ *  - if called with INVALID_BITARRAY_INDEX, simply returns
  * 
  * No return value 
  */

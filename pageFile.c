@@ -36,7 +36,9 @@ setPFBitIndex()
             currFrame >>= 1;     
         }
     }
-    return INVALID_PAGEFILE_INDEX;
+
+    return INVALID_BITARRAY_INDEX;
+    
 }
 
 
@@ -45,7 +47,7 @@ clearPFBitIndex(ULONG_PTR pfVA)
 {
 
     // if pagefile address is invalid, return
-    if (pfVA == INVALID_PAGEFILE_INDEX) {
+    if (pfVA == INVALID_BITARRAY_INDEX) {
 
         return;
 
@@ -98,9 +100,10 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
     bitIndex = setPFBitIndex();
 
 
-    if (bitIndex == INVALID_PAGEFILE_INDEX) {
+    if (bitIndex == INVALID_BITARRAY_INDEX) {
 
-        PRINT_ERROR("no remaining space in pagefile - could not write out\n");
+        enqueueVA(&writeVAListHead, writeVANode);
+        PRINT("no remaining space in pagefile - could not write out\n");
         return FALSE;
 
     }
@@ -157,7 +160,6 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
     PRINT("successfully wrote page to pagefile\n");
     return TRUE;
 }
-
 
 
 BOOLEAN

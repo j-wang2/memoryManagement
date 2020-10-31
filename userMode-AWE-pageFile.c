@@ -15,7 +15,7 @@
 #include "pageFault.h"
 #include "jLock.h"
 #include "pageTrade.h"
-
+#include "VADNodes.h"
 
 /******************************************************
  *********************** GLOBALS **********************
@@ -62,6 +62,10 @@ HANDLE wakeModifiedWriterHandle;
 ULONG_PTR numPagesReturned;
 
 ULONG_PTR virtualMemPages;
+
+PULONG_PTR VADBitArray;
+
+// PULONG_PTR aPFNs;
 
 
 BOOL
@@ -209,16 +213,12 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
         newPFN = PFNarray + aPFNs[i];
 
         commitCheckVA = VirtualAlloc(newPFN, sizeof (PFNdata), MEM_COMMIT, PAGE_READWRITE);
+        
         if (commitCheckVA == NULL) {
             PRINT_ERROR("failed to commit subsection of PFN array at PFN %d\n", i);
             exit(-1);
         }
 
-        //
-        // Atomically increment committed page count
-        //
-
-        InterlockedIncrement(&totalCommittedPages);
 
         //
         // note: no lock needed functionally (simply to satisfy assert in enqueuePage)
@@ -270,7 +270,7 @@ initPageFile(ULONG_PTR diskSize)
     }
 
     //TODO - reserves extra spot for page trade?
-    InterlockedIncrement(&totalCommittedPages);
+    // InterlockedIncrement(&totalCommittedPages);  // TODO
 
 }
 
@@ -541,11 +541,11 @@ VOID
 releaseAwaitingFreePFN(PPFNdata PFNtoFree)
 {
 
-    ASSERT(PFNtoFree->pageFileOffset != INVALID_PAGEFILE_INDEX);
+    ASSERT(PFNtoFree->pageFileOffset != INVALID_BITARRAY_INDEX);
         
     clearPFBitIndex(PFNtoFree->pageFileOffset);
 
-    PFNtoFree->pageFileOffset = INVALID_PAGEFILE_INDEX;
+    PFNtoFree->pageFileOffset = INVALID_BITARRAY_INDEX;
 
     // enqueue Page to free list
     enqueuePage(&freeListHead, PFNtoFree);
@@ -584,7 +584,7 @@ modifiedPageWriter()
     // revert PFN status to modified so that it can once again be faulted
     PFNtoWrite->statusBits = MODIFIED;
 
-    ASSERT(PFNtoWrite->pageFileOffset == INVALID_PAGEFILE_INDEX);
+    ASSERT(PFNtoWrite->pageFileOffset == INVALID_BITARRAY_INDEX);
     
     releaseJLock(&PFNtoWrite->lockBits);
 
@@ -623,16 +623,22 @@ modifiedPageWriter()
 
     // if write failed or the PFN has since been modified
     if (bResult != TRUE || PFNtoWrite->remodifiedBit == 1) {
-        
 
-        ASSERT(PFNtoWrite->pageFileOffset != INVALID_PAGEFILE_INDEX);
+        //
+        // Since write failure (bRes == FALSE) would leave pagefile offset as invalid
+        //
+        
+        if (PFNtoWrite->remodifiedBit == 1) {
+            ASSERT(PFNtoWrite->pageFileOffset != INVALID_BITARRAY_INDEX);
+
+        }
             
 
         // either way (write failed/PFN modified), clear PF index if it exists
         clearPFBitIndex(PFNtoWrite->pageFileOffset);
 
 
-        PFNtoWrite->pageFileOffset = INVALID_PAGEFILE_INDEX;
+        PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
 
 
         // If the page has not since been faulted in, re-enqueue to modified list
@@ -646,7 +652,7 @@ modifiedPageWriter()
         releaseJLock(&PFNtoWrite->lockBits);
 
         if (bResult != TRUE) {
-            PRINT_ERROR("[modifiedPageWriter] error writing out page\n");
+            PRINT("[modifiedPageWriter] error writing out page\n");
         }  else {
             PRINT("[modifiedPageWriter] Page has since been modified, clearing PF space\n");
         }
@@ -678,7 +684,12 @@ modifiedPageWriter()
     } 
     else {
 
-        ASSERT(currPTE->u1.hPTE.validBit == 1);     
+        ASSERT(currPTE->u1.hPTE.validBit == 1);             // TODO - note this has caused error
+                                                            // Syncrhonization issue: cannot read PTE without a lock
+                                                            // possible solution: include a modified bit in PFN that is cleared when
+                                                            // filesystemwrite begins, set when another thread tries to clear space
+                                                            // but can't do to write in progress, and replace line 689
+                                                            // with a check of that bit instead
 
         if (currPTE->u1.hPTE.dirtyBit == 1) {
 
@@ -686,12 +697,13 @@ modifiedPageWriter()
             clearPFBitIndex(PFNtoWrite->pageFileOffset);
 
             // clear pagefile pointer out of PFN
-            PFNtoWrite->pageFileOffset = INVALID_PAGEFILE_INDEX;
+            PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
             
             PRINT(" - Page has since been write faulted (discarding PF space)\n");
 
         }
     }
+
 
     releaseJLock(&PFNtoWrite->lockBits);
 
@@ -751,25 +763,34 @@ modifiedPageThread(HANDLE terminationHandle)
 BOOLEAN
 faultAndAccessTest()
 {
+    
+
+    PVOID testVA;
+    BOOLEAN bRes;
+
+
     PRINT_ALWAYS("Fault and access test\n");
 
     /************** TESTING *****************/
-    void* testVA;
     testVA = leafVABlock;
 
 
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
-    ULONG_PTR testNum = numPagesReturned * VM_MULTIPLIER;      //TEMPORARY
 
-    // PRINT_ALWAYS("Committing and then faulting in %llu pages\n", testNum);
+    // TODO - commit count issue on mem_commit vad
+
+    bRes = commitVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);     // commits with READ_ONLY permissions
+    // protectVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);   // converts to read write
+
+    if (bRes != TRUE) {
+
+        DebugBreak();
+
+    }
 
 
-    commitVA(testVA, READ_ONLY, testNum << PAGE_SHIFT);     // commits with READ_ONLY permissions
-    protectVA(testVA, READ_WRITE, testNum << PAGE_SHIFT);   // converts to read write
-
-
-    for (int i = 0; i < testNum; i++) {
+    for (int i = 0; i < virtualMemPages; i++) {
 
         faultStatus testStatus;
 
@@ -786,11 +807,11 @@ faultAndAccessTest()
         /************ TRADING pages ***********/
 
         #ifdef TRADE_PAGES
+
         PRINT("Attempting to trade VA\n");
         tradeVA(testVA);
 
         #endif
-
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
 
@@ -802,12 +823,12 @@ faultAndAccessTest()
 
     /************ TRIMMING tested VAs (active -> standby/modified) **************/
 
-    PRINT("Trimming %llu pages, modified writing half of them\n", testNum);
+    PRINT("Trimming %llu pages, modified writing half of them\n", virtualMemPages);
 
     // reset testVa
     testVA = leafVABlock;
 
-    for (int i = 0; i < testNum; i++) {
+    for (int i = 0; i < virtualMemPages; i++) {
 
         // trim the VAs we have just tested (to transition, from active)
         trimVA(testVA);
@@ -837,7 +858,7 @@ faultAndAccessTest()
 
     testVA = leafVABlock;
 
-    for (int i = 0; i < testNum; i++) {
+    for (int i = 0; i < virtualMemPages; i++) {
 
 
         #ifdef CHECK_PAGEFILE
@@ -858,7 +879,14 @@ faultAndAccessTest()
     /***************** DECOMMITTING AND CHECKING VAs **************/
 
     testVA = leafVABlock;
-    decommitVA(testVA, testNum << PAGE_SHIFT);
+    bRes = decommitVA(testVA, virtualMemPages << PAGE_SHIFT);
+
+    if (bRes != TRUE) {
+
+        DebugBreak();
+
+    }
+
 
     return TRUE;
 
@@ -909,13 +937,16 @@ faultAndAccessTestThread(HANDLE terminationHandle) {
 ULONG_PTR
 trimValidPTEs()
 {
+    
     PPTE currPTE;
+    PPTE endPTE;
+    ULONG_PTR numTrimmed;
+
+
     currPTE = PTEarray;
 
-    PPTE endPTE;
     endPTE = PTEarray + (((ULONG_PTR)leafVABlockEnd - (ULONG_PTR)leafVABlock) / PAGE_SIZE);
 
-    ULONG_PTR numTrimmed;
     numTrimmed = 0;
 
     for (currPTE; currPTE < endPTE; currPTE++ ) {
@@ -924,7 +955,8 @@ trimValidPTEs()
         // If currPTE is valid/active
         //
 
-        acquirePTELock(currPTE);
+        acquirePTELock(currPTE);        // TODO - make a copy of snap PTE and edit that indivisibly
+
 
         if (currPTE->u1.hPTE.validBit == 1) {
 
@@ -1015,7 +1047,7 @@ initListHead(PlistData headData)
     headData->count = 0;
 
     HANDLE pagesCreatedHandle;
-    pagesCreatedHandle = CreateEvent(NULL, FALSE, TRUE, NULL);
+    pagesCreatedHandle = CreateEvent(NULL, TRUE, TRUE, NULL);
 
     if (pagesCreatedHandle == INVALID_HANDLE_VALUE) {
         PRINT_ERROR("failed to create event handle\n");
@@ -1346,12 +1378,11 @@ testRoutine()
 
     char quitChar;
     quitChar = 'a';
-    while (quitChar != 'q') {
+    while (quitChar != 'q' && quitChar != 'f') {
         quitChar = getchar();
     }
     PRINT_ALWAYS("Ending program\n");
 
-    
 
     SetEvent(terminateThreadsHandle);
 
@@ -1372,16 +1403,39 @@ testRoutine()
 
     #endif
 
+    deleteVAD(leafVABlock, 0);
+
+    /********** Verify no PFNs remain active *********/
+
+    // PPFNdata currPFN;
+
+    // for (int j = 0; j < numPagesReturned; j++) {
+
+    //     currPFN = PFNarray + aPFNs[j];
+
+    //     acquireJLock(&currPFN->lockBits);
+    //     if (currPFN->statusBits > MODIFIED) {
+
+    //         DebugBreak();
+
+    //     }
+
+    //     releaseJLock(&currPFN->lockBits);
+
+
+    // }
 
     ULONG_PTR pageCount;
-    pageCount= 0;
+    pageCount = 0;
+
     for (int i = 0; i < ACTIVE; i++) {
 
         pageCount += listHeads[i].count;
 
     }
+
     PRINT_ALWAYS("total page count %llu\n", pageCount);
-    ASSERT(numPagesReturned == pageCount);
+    ASSERT(numPagesReturned == pageCount);  // plus one for the pagetrade???
 
 }
 
@@ -1439,7 +1493,7 @@ initializeVirtualMemory()
     memset(&pageFileBitArray, 0, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );
 
     // allocate an array of PFNs that is returned by AllocateUserPhysPages
-    ULONG_PTR *aPFNs;
+    PULONG_PTR aPFNs;
     aPFNs = VirtualAlloc(NULL, NUM_PAGES*(sizeof(ULONG_PTR)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     
     if (aPFNs == NULL) {
@@ -1468,6 +1522,19 @@ initializeVirtualMemory()
 
     // create virtual address block
     initVABlock(virtualMemPages);
+
+    initVADList();
+
+    //
+    // Initialize VAD bit array to denote availability across entire
+    // VM range
+    //
+
+    VADBitArray = VirtualAlloc(NULL, virtualMemPages/(sizeof(ULONG_PTR) * 8) + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+
+    // createVAD(NULL, virtualMemPages, READ_WRITE, TRUE);
+    createVAD(NULL, virtualMemPages, READ_WRITE, FALSE);
+
 
     // create local PFN metadata array
     initPFNarray(aPFNs, numPagesReturned);
@@ -1531,7 +1598,7 @@ main(int argc, char** argv)
 
 
     /******************** call test routine ******************/
-    testRoutine(numPagesReturned);
+    testRoutine();
 
 
     /******************* free allocated memory ***************/

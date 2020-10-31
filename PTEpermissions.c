@@ -1,6 +1,74 @@
 #include "userMode-AWE-pageFile.h"
 
 
+#define PTE_CHANGE_LOG
+
+
+#ifdef PTE_CHANGE_LOG
+
+#define LOG_ARRAY_SIZE 0x4000
+
+typedef struct _PTETrace{
+
+    PPTE dest;
+    PTE oldPTE;
+    PTE newPTE;
+
+    PVOID stackTrace[5];
+
+} PTETrace, *PPTETrace;
+
+PTETrace PTEHistoryLog[LOG_ARRAY_SIZE];
+
+LONG currLogIndex;
+
+#endif
+
+VOID
+writePTE(PPTE dest, PTE value)
+{
+    
+    #ifdef PTE_CHANGE_LOG
+
+    // todo - assert valid pte is assigned and PTEindex and PFN index correspond
+
+    if (value.u1.hPTE.validBit == 1) {
+
+        PPFNdata validPage;
+        ULONG_PTR PTEindex;
+
+        PTEindex = dest - PTEarray;
+
+        validPage = PFNarray + value.u1.hPTE.PFN;
+
+        ASSERT(validPage->PTEindex == PTEindex);
+
+    }
+
+
+    LONG index;
+    PPTETrace currTrace;
+
+
+    index = InterlockedIncrementAcquire(&currLogIndex);
+    index &= (LOG_ARRAY_SIZE - 1);
+    currTrace = &PTEHistoryLog[index];
+
+    currTrace->dest = dest;
+    currTrace->newPTE = value;
+    currTrace->oldPTE = *dest;
+
+    memset(&currTrace->stackTrace, 0, sizeof(currTrace->stackTrace));
+
+    currTrace->stackTrace[0] = (PVOID) _ReturnAddress();
+
+    #endif
+
+    * (volatile PTE *) dest = value;
+    
+}
+
+
 PPTE
 getPTE(void* virtualAddress)
 {
