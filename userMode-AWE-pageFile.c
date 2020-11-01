@@ -26,7 +26,7 @@ void* leafVABlockEnd;                   // ending address of virtual memory bloc
 PPFNdata PFNarray;                      // starting address of PFN metadata array
 PPTE PTEarray;                          // starting address of page table
 
-LONG totalCommittedPages;               // count of committed pages (initialized to zero)
+ULONG64 totalCommittedPages;               // count of committed pages (initialized to zero)
 ULONG_PTR totalMemoryPageLimit = NUM_PAGES + (PAGEFILE_SIZE >> PAGE_SHIFT);    // limit of committed pages (memory block + pagefile space)
 
 void* pageFileVABlock;                  // starting address of pagefile "disk" (memory)
@@ -1379,7 +1379,7 @@ testRoutine()
     char quitChar;
     quitChar = 'a';
     while (quitChar != 'q' && quitChar != 'f') {
-        quitChar = getchar();
+        quitChar = (char) getchar();
     }
     PRINT_ALWAYS("Ending program\n");
 
@@ -1532,8 +1532,8 @@ initializeVirtualMemory()
 
     VADBitArray = VirtualAlloc(NULL, virtualMemPages/(sizeof(ULONG_PTR) * 8) + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
-    // createVAD(NULL, virtualMemPages, READ_WRITE, TRUE);
-    createVAD(NULL, virtualMemPages, READ_WRITE, FALSE);
+    createVAD(NULL, virtualMemPages, READ_WRITE, TRUE);         // MEM_COMMIT vad
+    // createVAD(NULL, virtualMemPages, READ_WRITE, FALSE);        // MEM_RESERVE vad
 
 
     // create local PFN metadata array

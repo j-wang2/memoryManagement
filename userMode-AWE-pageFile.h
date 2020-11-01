@@ -15,7 +15,7 @@
 /*********** temporary testing macros ************/
 // #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
 #define TEMP_TESTING                                // temporary workaround for PF due to 
-#define NUM_THREADS 5
+#define NUM_THREADS 2
 #define TESTING_ZERO                                // toggles zero page thread
 #define TESTING_MODIFIED                            // toggles modified page writer thread
 #define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
@@ -193,7 +193,7 @@ extern void* leafVABlockEnd;               // ending address of memory block
 extern PPFNdata PFNarray;                  // starting address of PFN array
 extern PPTE PTEarray;                      // starting address of page table
 
-extern LONG totalCommittedPages;           // count of committed pages (initialized to zero)
+extern ULONG64 totalCommittedPages;           // count of committed pages (initialized to zero)
 extern ULONG_PTR totalMemoryPageLimit;     // limit of committed pages (memory block + pagefile space)
 
 

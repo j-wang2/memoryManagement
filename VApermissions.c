@@ -365,17 +365,11 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
                 // "Return" (decrement) count of committed pages
                 //
 
-                if (totalCommittedPages > 0)  {
 
-                    InterlockedDecrement(&totalCommittedPages);
+                ASSERT(totalCommittedPages > 0);
 
-                } else {
+                InterlockedDecrement64(&totalCommittedPages);
 
-                    releasePTELock(currPTE);
-                    PRINT_ERROR("[decommitVA] bookkeeping error - no committed pages\n");
-                    return FALSE;
-
-                }
             }
 
             //
@@ -392,7 +386,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
                 tempPTE.u1.tPTE.permissions = RWEpermissions;
 
             // } else if (tempPTE.u1.pfPTE.permissions != NO_ACCESS && tempPTE.u1.pfPTE.pageFileIndex != INVALID_BITARRAY_INDEX) {
-            } else if (tempPTE.u1.pfPTE.permissions != NO_ACCESS) {
+            } else if (tempPTE.u1.pfPTE.permissions != NO_ACCESS) {             // covers both pagefile and demand zero cases
 
                 tempPTE.u1.pfPTE.permissions = RWEpermissions;
 
@@ -426,14 +420,16 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         }
 
         //
-        // Commit PTE/page with priviliges param
+        // Commit PTE/page with priviliges param, clearing decommit bit and setting pfIndex to invalid value
         //
 
         tempPTE.u1.dzPTE.permissions = RWEpermissions;
 
+        tempPTE.u1.dzPTE.decommitBit = 0;
+
         tempPTE.u1.dzPTE.pageFileIndex = INVALID_BITARRAY_INDEX;
 
-        currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
+        currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );                       // equiv to PTEindex*page_size
         PRINT("[commitVA] Committed PTE at VA %llx with permissions %d\n", (ULONG_PTR) currVA, RWEpermissions);
         
 
@@ -595,7 +591,8 @@ trimVA(void* virtualAddress)
 
 
 BOOLEAN
-protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize) {
+protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize) 
+{
 
     PPTE startPTE;
     PVOID endVA;
@@ -706,7 +703,8 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
 
 
 BOOLEAN
-decommitVA (PVOID startVA, ULONG_PTR commitSize) {
+decommitVA (PVOID startVA, ULONG_PTR commitSize) 
+{
 
 
     PPTE startPTE;
@@ -966,6 +964,9 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
         }
         else if (tempPTE.u1.dzPTE.decommitBit == 1) {
 
+
+            ASSERT(tempPTE.u1.dzPTE.pageFileIndex == 0 && tempPTE.u1.dzPTE.permissions == 0 && tempPTE.u1.dzPTE.transitionBit == 0 && tempPTE.u1.dzPTE.validBit == 0);  // todo
+
             PRINT("[decommitVA] already decommitted\n");
 
             continue;
@@ -987,11 +988,10 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize) {
 
         ASSERT(totalCommittedPages > 0);
 
-        InterlockedDecrement(&totalCommittedPages);
+        InterlockedDecrement64(&totalCommittedPages);
 
         //
         // If VAD is commit, set decommitBit in PTE
-        // (do not need to decrement committed pages, since VAD already commits)
         //
         
         if (currVAD->commitBit) {
@@ -1027,8 +1027,8 @@ BOOLEAN
 commitPages (ULONG_PTR numPages)
 {
 
-    LONG oldVal;
-    LONG tempVal;
+    ULONG64 oldVal;
+    ULONG64 tempVal;
 
     oldVal = totalCommittedPages;
 
@@ -1065,8 +1065,8 @@ commitPages (ULONG_PTR numPages)
         }
 
 
-        tempVal = InterlockedCompareExchange(&totalCommittedPages, oldVal + numPages, oldVal);
-        // tempVal = InterlockedCompareExchange64(&totalCommittedPages, oldVal + numPages, oldVal);
+        // tempVal = InterlockedCompareExchange(&totalCommittedPages, oldVal + numPages, oldVal);
+        tempVal = InterlockedCompareExchange64(&totalCommittedPages, oldVal + numPages, oldVal);
 
 
         //

@@ -41,7 +41,7 @@ tryAcquireJLock(volatile PLONG lock);
  * No return value
  */
 VOID
-initPTELocks(ULONG_PTR numPages);
+initPTELocks(ULONG_PTR totalVirtualMemPages);
 
 
 /*
@@ -53,7 +53,7 @@ initPTELocks(ULONG_PTR numPages);
  *  - FALSE on failure
  */
 BOOLEAN
-freePTELocks(PCRITICAL_SECTION LockArray, ULONG_PTR virtualMemPages);
+freePTELocks(PCRITICAL_SECTION LockArray, ULONG_PTR totalVirtualMemPages);
 
 
 /*

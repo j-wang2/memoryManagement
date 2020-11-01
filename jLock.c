@@ -36,11 +36,11 @@ tryAcquireJLock(volatile PLONG lock)
 
 
 VOID
-initPTELocks(ULONG_PTR virtualMemPages)
+initPTELocks(ULONG_PTR totalVirtualMemPages)
 {
 
     ULONG_PTR numLocks;
-    numLocks = virtualMemPages / PAGES_PER_LOCK;
+    numLocks = totalVirtualMemPages / PAGES_PER_LOCK;
 
     // 
     // Allocate a lock array corresponding to PTEs in pagetable
@@ -65,7 +65,7 @@ initPTELocks(ULONG_PTR virtualMemPages)
 
 
 BOOLEAN
-freePTELocks(PCRITICAL_SECTION LockArray, ULONG_PTR virtualMemPages)
+freePTELocks(PCRITICAL_SECTION LockArray, ULONG_PTR totalVirtualMemPages)
 {
     
     ULONG_PTR numLocks;
@@ -78,7 +78,7 @@ freePTELocks(PCRITICAL_SECTION LockArray, ULONG_PTR virtualMemPages)
 
     }
 
-    numLocks = virtualMemPages / PAGES_PER_LOCK;
+    numLocks = totalVirtualMemPages / PAGES_PER_LOCK;
 
     for (int i = 0; i <= numLocks; i++) {
 

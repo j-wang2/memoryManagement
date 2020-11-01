@@ -44,7 +44,7 @@ tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)
     releaseJLock(&(pageToTrade->lockBits));
 
     // increment commit count, since this page is now out of circulation
-    InterlockedIncrement(&totalCommittedPages);
+    InterlockedIncrement64(&totalCommittedPages);
 
     return TRUE;
 
@@ -205,7 +205,7 @@ tradeTransitionPage(ULONG_PTR PFNtoTrade)
     releaseJLock(&(pageToTrade->lockBits));
 
     // increment commit count, since this page is now out of circulation (in addition to the one that is just brought in)
-    InterlockedIncrement(&totalCommittedPages);
+    InterlockedIncrement64(&totalCommittedPages);
 
     return TRUE;
 
