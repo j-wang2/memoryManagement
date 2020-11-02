@@ -60,16 +60,17 @@ reserveBitRange(ULONG_PTR bits, PULONG_PTR bitArray, ULONG_PTR bitArraySize)
 
 
             // 
-            // Find first free location (cleared bit)
+            // Check if location is cleared (cleared bit)
             //
 
             if ((currFrame & 1) == 0) {
 
-                bitsFound++;
-                // printf("i = %llu\n", i);
-                // printf("j = %llu\n", j);
-                // printf("bitsFound = %llu\n", bitsFound);
+                //
+                // Increment bitsFound, checking to see if the requested amount 
+                // has been reached - if so, break
+                //
 
+                bitsFound++;
 
                 if (bitsFound == bits) {
 
@@ -90,11 +91,16 @@ reserveBitRange(ULONG_PTR bits, PULONG_PTR bitArray, ULONG_PTR bitArraySize)
 
         }
 
+        //
+        // If all requested bits are found successfully,
+        // break, set bit range, and return the starting
+        // index
+        //
+
         if (success == TRUE) {
-            printf("bitsFound = %llu\n", bitsFound);
-            printf("i = %llu\n", i);
-            printf("j = %llu\n", j);
+
             break;
+
         }
 
     }

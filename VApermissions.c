@@ -16,7 +16,9 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
     faultStatus PFstatus;
     PFstatus = SUCCESS;
 
-    while (PFstatus == SUCCESS || PFstatus == NO_AVAILABLE_PAGES || PFstatus == PAGE_STATE_CHANGE ) {
+    // todo - cannot get page_state_change once fixed in pf handler
+
+    while (PFstatus == SUCCESS || PFstatus == PAGE_STATE_CHANGE ) {
         
         #ifdef TEMP_TESTING
 
@@ -118,7 +120,10 @@ writeVA(PVOID virtualAddress, PVOID str)
 
     PFstatus = accessVA(virtualAddress, READ_WRITE);
 
-    while (PFstatus == SUCCESS || PFstatus == NO_AVAILABLE_PAGES || PFstatus == PAGE_STATE_CHANGE ) {
+    // todo - cannot get page_state_change once fixed in pf handler
+
+
+    while (PFstatus == SUCCESS || PFstatus == PAGE_STATE_CHANGE ) {
 
         _try {
 
@@ -180,8 +185,9 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
     PVOID currVA;
 
     //
-    // Calculate endVA from startVA and commit size,
-    // with -1 for inclusivity (use <= as condition)
+    // Calculate endVA from startVA and commit size, with -1 for inclusivity
+    // (use <= as condition). This is also consistent with calculation
+    // in decommitVA and VAD create/delete
     //
 
     endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
@@ -203,8 +209,6 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         return FALSE;
 
     }
-
-    // numPages = commitSize >> PAGE_SHIFT;
 
     //
     // Calculate number of pages spanned by commit
@@ -729,9 +733,13 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
     }
 
-    // inclusive (use <= as condition)
-    endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);  // TODO 
-    // endVA = (PVOID) ((ULONG_PTR) startVA + commitSize );
+    //
+    // Calculate endVA inclusively, where endVA converts to the final PTE that is 
+    // decommitted (Thus, use <= as condition). This is also consistent with calculation
+    // in commitVA and VAD create/delete
+    //
+
+    endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
 
 
     endPTE = getPTE(endVA);
@@ -964,17 +972,14 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
         }
         else if (tempPTE.u1.dzPTE.decommitBit == 1) {
 
-
-            ASSERT(tempPTE.u1.dzPTE.pageFileIndex == 0 && tempPTE.u1.dzPTE.permissions == 0 && tempPTE.u1.dzPTE.transitionBit == 0 && tempPTE.u1.dzPTE.validBit == 0);  // todo
-
-            PRINT("[decommitVA] already decommitted\n");
+            PRINT("[decommitVA] PTE has already been decommitted\n");
 
             continue;
 
         }
-        else if (tempPTE.u1.ulongPTE == 0 && currVAD->commitBit == 0) {                            // zero PTE
+        else if (tempPTE.u1.ulongPTE == 0 && currVAD->commitBit == 0) { // zero PTE
             
-            PRINT("[decommitVA] already decommitted\n");
+            PRINT("[decommitVA] PTE has already been decommitted\n");
 
             continue;
 

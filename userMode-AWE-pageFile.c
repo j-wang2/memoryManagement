@@ -65,6 +65,8 @@ ULONG_PTR virtualMemPages;
 
 PULONG_PTR VADBitArray;
 
+CRITICAL_SECTION pageFileLock;
+
 // PULONG_PTR aPFNs;
 
 
@@ -588,10 +590,13 @@ modifiedPageWriter()
     
     releaseJLock(&PFNtoWrite->lockBits);
 
+    ULONG_PTR expectedSig;
+    expectedSig = (ULONG_PTR) leafVABlock + ( ( PFNtoWrite->PTEindex ) << PAGE_SHIFT );
+
 
     // write page out - can no longer be accessed since write in progress is one
     BOOLEAN bResult;
-    bResult = writePageToFileSystem(PFNtoWrite);
+    bResult = writePageToFileSystem(PFNtoWrite, expectedSig);
 
 
     // Acquire lock to view PFN
@@ -660,9 +665,11 @@ modifiedPageWriter()
         return TRUE;
     }
 
-
-    // currPTE must be "good" since PFN has not been decommitted (we hold lock)
+    //
+    // CurrPTE must be "good" since PFN has not been decommitted (we hold lock)
     // can be either valid or transition (dangling since we hold write in progress bit)
+    //
+
     PPTE currPTE;
     currPTE = PTEarray + PFNtoWrite->PTEindex;    
 
@@ -777,8 +784,6 @@ faultAndAccessTest()
 
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
-
-    // TODO - commit count issue on mem_commit vad
 
     bRes = commitVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);     // commits with READ_ONLY permissions
     // protectVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);   // converts to read write
@@ -1492,6 +1497,11 @@ initializeVirtualMemory()
     // memset the pageFile bit array
     memset(&pageFileBitArray, 0, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );
 
+    //
+    // Initialize pagefile critical section
+    //
+    InitializeCriticalSection(&pageFileLock);
+
     // allocate an array of PFNs that is returned by AllocateUserPhysPages
     PULONG_PTR aPFNs;
     aPFNs = VirtualAlloc(NULL, NUM_PAGES*(sizeof(ULONG_PTR)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -1532,8 +1542,8 @@ initializeVirtualMemory()
 
     VADBitArray = VirtualAlloc(NULL, virtualMemPages/(sizeof(ULONG_PTR) * 8) + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
-    createVAD(NULL, virtualMemPages, READ_WRITE, TRUE);         // MEM_COMMIT vad
-    // createVAD(NULL, virtualMemPages, READ_WRITE, FALSE);        // MEM_RESERVE vad
+    // createVAD(NULL, virtualMemPages, READ_WRITE, TRUE);         // MEM_COMMIT vad
+    createVAD(NULL, virtualMemPages, READ_WRITE, FALSE);        // MEM_RESERVE vad
 
 
     // create local PFN metadata array

@@ -10,6 +10,8 @@ setPFBitIndex()
 
     ULONG_PTR bitIndex;
 
+    EnterCriticalSection(&pageFileLock);
+
     for (ULONG_PTR i = 0; i < ARRAYSIZE (pageFileBitArray); i++) {
 
         ULONG_PTR currFrame;
@@ -31,11 +33,16 @@ setPFBitIndex()
 
                 // calculate bitIndex
                 bitIndex = (i * (sizeof(currFrame)) * 8) + j;
+
+                LeaveCriticalSection(&pageFileLock);
+
                 return bitIndex;
             }
             currFrame >>= 1;     
         }
     }
+
+    LeaveCriticalSection(&pageFileLock);
 
     return INVALID_BITARRAY_INDEX;
     
@@ -65,16 +72,22 @@ clearPFBitIndex(ULONG_PTR pfVA)
     i = pfVA / (sizeof(ULONG_PTR) * 8);
     j = pfVA % (sizeof(ULONG_PTR) * 8);
 
+    EnterCriticalSection(&pageFileLock);
+
+
     currFrame = pageFileBitArray[i];
     currFrame &= ~((ULONG_PTR)1 << j);
 
     pageFileBitArray[i] = currFrame;
 
+    LeaveCriticalSection(&pageFileLock);
+
+
 }
 
 
 BOOLEAN
-writePageToFileSystem(PPFNdata PFNtoWrite)
+writePageToFileSystem(PPFNdata PFNtoWrite, ULONG_PTR expectedSig)
 {
 
     PVANode writeVANode;
@@ -122,8 +135,11 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
 
     }
 
+    ASSERT(expectedSig == * (PULONG_PTR) modifiedWriteVA || * (PULONG_PTR) modifiedWriteVA == 0 );
+
+
     // get location in pagefile from bitindex
-    void* PFLocation;
+    PVOID PFLocation;
     PFLocation = (void*) ( (ULONG_PTR)pageFileVABlock + ( bitIndex << PAGE_SHIFT ) );        // equiv to bitIndex*page_size
 
 
@@ -141,6 +157,7 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
         PRINT_ERROR("error unmapping modifiedWriteVA\n");
 
         return FALSE;
+
     }
 
 
@@ -163,7 +180,7 @@ writePageToFileSystem(PPFNdata PFNtoWrite)
 
 
 BOOLEAN
-readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex) {
+readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex, ULONG_PTR expectedSig) {
 
     
     PVANode readPFVANode;
@@ -201,6 +218,11 @@ readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex) {
     // copy contents from pagefile to our new page
     memcpy(readPFVA, PFsourceVA, PAGE_SIZE);
 
+    //
+    // Verify signature is coming back as expected (either VA signature or 0)
+    //
+
+    ASSERT(expectedSig == * (PULONG_PTR) readPFVA || * (PULONG_PTR) readPFVA == 0 );
 
     // unmap VA from page - PFN is now filled w contents from pagefile
     if (!MapUserPhysicalPages(readPFVA, 1, NULL)) {

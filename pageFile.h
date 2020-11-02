@@ -37,7 +37,7 @@ clearPFBitIndex(ULONG_PTR pfVA);
  *  - FALSE on failure
  */
 BOOLEAN
-writePageToFileSystem(PPFNdata PFNtoWrite);
+writePageToFileSystem(PPFNdata PFNtoWrite, ULONG_PTR expectedSig);
 
 
 /*
@@ -49,6 +49,6 @@ writePageToFileSystem(PPFNdata PFNtoWrite);
  * 
  */
 BOOLEAN
-readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex);
+readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex, ULONG_PTR expectedSig);
 
 #endif

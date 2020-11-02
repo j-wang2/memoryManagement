@@ -160,7 +160,8 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         releasePTELock(masterPTE);
 
         //
-        // Since event is manually reset, this thread will not wait on an event that has already been set
+        // Since event is manually reset, this thread will not wait on an
+        // event that has already been set (thus avoiding potential deadlock)
         //
 
         WaitForSingleObject(currEvent, INFINITE);
@@ -408,10 +409,12 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     //
 
     bResult = FALSE;
+
+    ULONG_PTR signature = (ULONG_PTR) virtualAddress & ~(PAGE_SIZE - 1);
     
     while (bResult != TRUE) {
 
-        bResult = readPageFromFileSystem(pageNum, snapPTE.u1.pfPTE.pageFileIndex);
+        bResult = readPageFromFileSystem(pageNum, snapPTE.u1.pfPTE.pageFileIndex, signature);
 
     }
 
@@ -660,7 +663,9 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     bresult = MapUserPhysicalPages(virtualAddress, 1, &pageNum);
 
     if (bresult != TRUE) {
+
         PRINT_ERROR("[dz PageFault] Error mapping user physical pages\n");
+
     }
 
     //
@@ -763,6 +768,8 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         //
 
         status = transPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
+
+        // todo - if page changes state, retry fault
 
     }
     else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS &&                // PAGEFILE STATE PTE

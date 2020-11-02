@@ -236,6 +236,9 @@ extern PULONG_PTR VADBitArray;
 
 extern ULONG_PTR virtualMemPages;
 
+extern CRITICAL_SECTION pageFileLock;
+
+
 
 
 // toggle multithreading on and off
