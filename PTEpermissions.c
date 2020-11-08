@@ -30,8 +30,6 @@ writePTE(PPTE dest, PTE value)
     
     #ifdef PTE_CHANGE_LOG
 
-    // todo - assert valid pte is assigned and PTEindex and PFN index correspond
-
     if (value.u1.hPTE.validBit == 1) {
 
         PPFNdata validPage;

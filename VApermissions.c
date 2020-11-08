@@ -183,6 +183,9 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
     BOOLEAN bRes;
     BOOLEAN returnCommitPages;
     PVOID currVA;
+    BOOLEAN reprocessPTE;
+
+    reprocessPTE = FALSE;
 
     //
     // Calculate endVA from startVA and commit size, with -1 for inclusivity
@@ -254,7 +257,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         //    committed and try to commit only the uncommitted PTEs instead
         //
 
-        ULONG_PTR prevCommitted;
+        ULONG_PTR currDecommitted;
 
         bRes = commitPages(numPages);
 
@@ -265,14 +268,14 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
         if (bRes == FALSE) {
 
-            prevCommitted = checkCommitted(FALSE, startPTE, endPTE);
+            currDecommitted = checkDecommitted(FALSE, startPTE, endPTE);
 
-            bRes = commitPages(numPages - prevCommitted);
+            bRes = commitPages(currDecommitted);
 
             if (bRes == FALSE) {
 
                 LeaveCriticalSection(&VADListHead.lock);
-                PRINT_ERROR("[commitVA] Insufficient commit charge\n");
+                PRINT("[commitVA] Insufficient commit charge\n");
                 return FALSE;
 
             }
@@ -293,11 +296,11 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         // and only commit those
         //
 
-        ULONG_PTR prevDecommitted;
+        ULONG_PTR currDecommitted;
 
-        prevDecommitted = checkCommitted(TRUE, startPTE, endPTE);
+        currDecommitted = checkDecommitted(TRUE, startPTE, endPTE);
 
-        bRes = commitPages(prevDecommitted);
+        bRes = commitPages(currDecommitted);
 
         if (bRes == FALSE) {
 
@@ -327,13 +330,19 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         // if current PTE's lock differs from the previous PTE's lock 
         //
 
-        if (currPTE != startPTE) {
+        if (currPTE != startPTE && reprocessPTE == FALSE) {
 
             lockHeld = acquireOrHoldSubsequentPTELock(currPTE, currPTE - 1);
 
+        } else {
+
+            reprocessPTE = FALSE;
+            
         }
  
         if (lockHeld == FALSE) {
+
+            LeaveCriticalSection(&VADListHead.lock);
 
             PRINT_ERROR("[commitVA] unable to acquire lock - fatal error\n");
             return FALSE;
@@ -357,29 +366,9 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
             || (tempPTE.u1.ulongPTE == 0 && currVAD->commitBit)
             ) {
 
-
-            //
-            // PTE has previously been committed, VAD is reserve,
-            // AND returnCommittedPages is TRUE, return charge
-            //
-
-            if (currVAD->commitBit == 0 && returnCommitPages) {
-                
-                //
-                // "Return" (decrement) count of committed pages
-                //
-
-
-                ASSERT(totalCommittedPages > 0);
-
-                InterlockedDecrement64(&totalCommittedPages);
-
-            }
-
             //
             // Overwrite old PTE permissions
             //
-
 
             if (tempPTE.u1.hPTE.validBit == 1) {
 
@@ -387,9 +376,68 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
             } else if (tempPTE.u1.tPTE.transitionBit == 1) {
 
+                PPFNdata transPFN;
+                transPFN = PFNarray + tempPTE.u1.tPTE.PFN;
+
+                //
+                // For a transition PTE, page lock  must be acquired in
+                // order to verify PTE has not changed state. If PTE is transition,
+                // writing of PTE occurss within this if-statement, rather
+                // than falling through in order to release locks
+                //
+
+                acquireJLock(&transPFN->lockBits);
+
+                // Verify the PTE is still in transition format and pointed to by PTE index
+                if ( tempPTE.u1.ulongPTE != currPTE->u1.ulongPTE
+                || (transPFN->statusBits != STANDBY && transPFN->statusBits != MODIFIED)
+                || transPFN->PTEindex != (ULONG64) (currPTE - PTEarray) ) {
+                    
+                    releaseJLock(&transPFN->lockBits);
+
+                    PRINT("[decommitVA] currPFN has changed from transition state\n");
+
+                    //
+                    // Reprocess same PTE since it has since been changed
+                    //
+
+                    reprocessPTE = TRUE;
+
+                    currPTE--;
+
+                    continue;
+
+                }
+
+
                 tempPTE.u1.tPTE.permissions = RWEpermissions;
 
-            // } else if (tempPTE.u1.pfPTE.permissions != NO_ACCESS && tempPTE.u1.pfPTE.pageFileIndex != INVALID_BITARRAY_INDEX) {
+                writePTE(currPTE, tempPTE);
+
+                releaseJLock(&transPFN->lockBits);
+
+                //
+                // PTE has previously been committed, VAD is reserve,
+                // AND returnCommittedPages is TRUE, return charge
+                // (Must occur within if statement since trans PTE
+                // does not "fall through").
+                //
+
+                if (currVAD->commitBit == 0 && returnCommitPages) {
+                    
+                    //
+                    // "Return" (decrement) count of committed pages
+                    //
+
+                    ASSERT(totalCommittedPages > 0);
+
+                    InterlockedDecrement64(&totalCommittedPages);
+
+                }
+
+                continue;
+
+
             } else if (tempPTE.u1.pfPTE.permissions != NO_ACCESS) {             // covers both pagefile and demand zero cases
 
                 tempPTE.u1.pfPTE.permissions = RWEpermissions;
@@ -405,9 +453,25 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
             }
 
+            //
+            // PTE has previously been committed, VAD is reserve,
+            // AND returnCommittedPages is TRUE, return charge
+            //
+
+            if (currVAD->commitBit == 0 && returnCommitPages) {
+                
+                //
+                // "Return" (decrement) count of committed pages
+                //
+
+                ASSERT(totalCommittedPages > 0);
+
+                InterlockedDecrement64(&totalCommittedPages);
+
+            }
+
             writePTE(currPTE, tempPTE);
             
-
             PRINT("[commitVA] PTE is already valid, transition, or demand zero\n");
             continue;
 
@@ -574,6 +638,9 @@ trimPTE(PPTE PTEaddress)
         if (bRes != TRUE) {
             PRINT_ERROR("[trimPTE] failed to set event\n");
         }
+
+        ResetEvent(wakeModifiedWriterHandle); // todo
+
     }
 
     return TRUE;
@@ -706,10 +773,11 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
 }
 
 
+
+
 BOOLEAN
 decommitVA (PVOID startVA, ULONG_PTR commitSize) 
 {
-
 
     PPTE startPTE;
     PVOID endVA;
@@ -805,6 +873,10 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
         if (currPTE != startPTE && reprocessPTE == FALSE) {
             
             lockHeld = acquireOrHoldSubsequentPTELock(currPTE, currPTE - 1);
+
+        } else {
+
+            reprocessPTE = FALSE;
 
         }
 
@@ -905,6 +977,9 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
             PPFNdata currPFN;
             currPFN = PFNarray + tempPTE.u1.tPTE.PFN;
 
+            //
+            // Must acquire page lock to verify PTE has not changed state
+            //
 
             acquireJLock(&currPFN->lockBits);
 
@@ -938,23 +1013,55 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
                 currPFN->statusBits = AWAITING_FREE;
 
             }
-            else { 
+            else {
+
                 // dequeue from standby/modified list
                 dequeueSpecificPage(currPFN);
 
                 // if the PFN contents are also stored in pageFile
                 if (currPFN->pageFileOffset != INVALID_BITARRAY_INDEX ) {
+
                     clearPFBitIndex(currPFN->pageFileOffset);
+                    
                 }
 
                 // enqueue Page to free list (setting status bits in process)
                 enqueuePage(&freeListHead, currPFN);
+
+            }      
+
+
+            tempPTE.u1.ulongPTE = 0;
+
+            //
+            // If VAD is commit, set decommitBit in PTE
+            //
+            
+            if (currVAD->commitBit) {
+
+                tempPTE.u1.dzPTE.decommitBit = 1;
+
             }
-           
+
+            //
+            // PTE must be written prior to release of page lock
+            //
+
+            writePTE(currPTE, tempPTE);
 
             releaseJLock(&currPFN->lockBits);
 
-            tempPTE.u1.ulongPTE = 0;
+            
+            //
+            // Decrement committed pages regardless of whether VAD is 
+            // commit or reserve
+            //
+
+            ASSERT(totalCommittedPages > 0);
+
+            InterlockedDecrement64(&totalCommittedPages);
+
+            continue;
 
 
         }  
@@ -1022,7 +1129,6 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
     LeaveCriticalSection(&VADListHead.lock);
 
-
     return TRUE;
 
 }
@@ -1064,15 +1170,12 @@ commitPages (ULONG_PTR numPages)
             // no remaining pages
             //
 
-            PRINT_ERROR("[commitVA] All commit charge used (no remaining pages) - unable to commit PTE\n");
+            PRINT("[commitVA] All commit charge used (no remaining pages) - unable to commit PTE\n");
             return FALSE;
 
         }
 
-
-        // tempVal = InterlockedCompareExchange(&totalCommittedPages, oldVal + numPages, oldVal);
         tempVal = InterlockedCompareExchange64(&totalCommittedPages, oldVal + numPages, oldVal);
-
 
         //
         // Compare exchange successful
@@ -1092,15 +1195,13 @@ commitPages (ULONG_PTR numPages)
 
 
 ULONG_PTR
-checkCommitted(BOOLEAN isVADCommit, PPTE startPTE, PPTE endPTE)
+checkDecommitted(BOOLEAN isVADCommit, PPTE startPTE, PPTE endPTE)
 {
 
     PPTE currPTE;
-    ULONG_PTR numCommitted;
     ULONG_PTR numDecommitted;
     BOOLEAN lockHeld;
 
-    numCommitted = 0;
     numDecommitted = 0;
 
     lockHeld = TRUE;

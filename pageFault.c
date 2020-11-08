@@ -62,7 +62,16 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
             // clear pagefile pointer out of PFN
             PFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
-        }
+        } 
+        
+        // else {
+
+        //     PFN->dirtyBit = 1;     // TODO
+
+        // }
+
+        // PFN->dirtyBit = 1;     // TODO
+
 
         //
         // Otherwise, if the write in progress bit is set, the modified writer is 
@@ -210,7 +219,12 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
             // clear pagefile pointer out of PFN
             transitionPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
-        }
+        } 
+        // else {
+
+        //     transitionPFN->dirtyBit = 1;   // TODO
+
+        // }
 
 
     } else {
@@ -219,6 +233,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         if (transitionPFN->statusBits == MODIFIED) {
 
             newPTE.u1.hPTE.dirtyBit = 1;
+            // transitionPFN->dirtyBit = 1;        // todo
 
         }
         
@@ -425,16 +440,34 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     acquirePTELock(masterPTE);
 
     //
-    // While page is being written out, PTE can be decommitted
+    // While page is being read in from filesystem, PTE can be decommitted
     //
 
     if (newPTE.u1.ulongPTE != masterPTE->u1.ulongPTE) {
 
         ASSERT(freedPFN->statusBits == AWAITING_FREE);
 
-        ASSERT(masterPTE->u1.ulongPTE == 0);
+        ASSERT(masterPTE->u1.ulongPTE == 0 || masterPTE->u1.dzPTE.decommitBit == 1);
 
         acquireJLock(&freedPFN->lockBits);
+
+        //
+        // set readInProgressBit to 0 and set event so other threads that have transition faulted on this PTE can proceed
+        //
+
+        ASSERT(freedPFN->readInProgressBit == 1);
+
+        freedPFN->readInProgressBit = 0;
+        
+        SetEvent(readInProgEventNode->event);
+
+        if (InterlockedDecrement(&readInProgEventNode->refCount) == 0) {
+
+            freedPFN->readInProgEvent = NULL;
+
+            enqueueEvent(&readInProgEventListHead, readInProgEventNode);
+
+        }
 
         releaseAwaitingFreePFN(freedPFN);
 
@@ -444,7 +477,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         // VA has been decommitted during fault by another thread
         //
 
-        return ACCESS_VIOLATION;
+        return PAGE_STATE_CHANGE;
 
     }
     
@@ -485,6 +518,8 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
         newPTE.u1.hPTE.dirtyBit = 1;
 
+        // freedPFN->dirtyBit = 1;     // TODO
+
         //
         // free PF location 
         // Note: locking is required, since if two threads clear near-simultaneously, 
@@ -492,7 +527,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         // second thread would clear data that is unrelated and unexpected
         //
 
-        clearPFBitIndex(snapPTE.u1.pfPTE.pageFileIndex);
+        clearPFBitIndex(snapPTE.u1.pfPTE.pageFileIndex);        // check that this makes sense - todo
 
         // clear pagefile pointer out of PFN
         freedPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
@@ -765,11 +800,10 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
         //
         // PFN lock is acquired by transPageFault since it may be released in readinprog case
+        // If page changes state prior to PFN lock acquisition, retry fault
         //
 
         status = transPageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);
-
-        // todo - if page changes state, retry fault
 
     }
     else if (oldPTE.u1.pfPTE.permissions != NO_ACCESS &&                // PAGEFILE STATE PTE
@@ -859,16 +893,24 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
             WaitForMultipleObjects(STANDBY + 1, pageEventHandles, FALSE, INFINITE);
 
+
         } else {
 
-            for (int i = 0; i < STANDBY + 1; i++) {
+            for (int i = STANDBY; i >= 0; i--) {
+
 
                 LeaveCriticalSection(&listHeads[i].lock);
 
-            } 
+            }
+
         }
 
     }
+    // else if (status == PAGE_STATE_CHANGE) {       todo
+
+    //     PRINT("[pageFile] transition page has changed state\n");
+    //     status = SUCCESS;
+    // }
     
     return status;
 

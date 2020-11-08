@@ -63,7 +63,11 @@ getStandbyPage(BOOLEAN returnLocked)
     if (standbyListHead.count != 0) {
 
         //
-        // dequeue a page from standby page (with lock bits set, since PTE lock acquisition could cause deadlock)
+        // dequeue a page from standby page (with lock bits set, 
+        // since PTE lock acquisition could cause deadlock).
+        // Since PTE lock is not acquired, other functions MUST
+        // verify page has not changed state post acquisition of a 
+        // transition PFn from trans state PTE.
         //
 
         returnPFN = dequeueLockedPageFromTail(&standbyListHead, TRUE);
@@ -79,7 +83,12 @@ getStandbyPage(BOOLEAN returnLocked)
 
         // create copy of the currPTE to reference
         PTE oldPTE;
-        oldPTE = *currPTE;
+        oldPTE = *currPTE; 
+
+        ULONG_PTR pageNum;
+        pageNum = returnPFN - PFNarray;
+
+        ASSERT(oldPTE.u1.tPTE.transitionBit == 1 && oldPTE.u1.tPTE.PFN == pageNum);
 
         //  create newPTE initialized to zero (blank slate)
         PTE newPTE;

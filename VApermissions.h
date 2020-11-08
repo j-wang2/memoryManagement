@@ -96,7 +96,7 @@ commitPages (ULONG_PTR numPages);
 
 
 ULONG_PTR
-checkCommitted(BOOLEAN isVADCommit, PPTE startPTE, PPTE endPTE);
+checkDecommitted(BOOLEAN isVADCommit, PPTE startPTE, PPTE endPTE);
 
 
 #endif

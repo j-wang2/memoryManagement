@@ -44,30 +44,27 @@ listData readPFVAListHead;              // listHead of pagefile read VAs used fo
 listData pageTradeVAListHead;
 
 listData VADListHead;                   // list of VADs
+listData readInProgEventListHead;       // list of events
 
-listData readInProgEventListHead;
-
-CRITICAL_SECTION PTELock;
-
+/********** Locks ************/
 PCRITICAL_SECTION PTELockArray;
+CRITICAL_SECTION pageFileLock;
 
 HANDLE physicalPageHandle;              // for multi-mapped pages (to support multithreading)
 
-BOOLEAN debugMode;                      // toggled by -v flag on cmd line
-
-HANDLE availablePagesLowHandle;
-
+HANDLE wakeTrimHandle;
 HANDLE wakeModifiedWriterHandle;
 
 ULONG_PTR numPagesReturned;
-
 ULONG_PTR virtualMemPages;
 
 PULONG_PTR VADBitArray;
 
-CRITICAL_SECTION pageFileLock;
+BOOLEAN debugMode;                      // toggled by -v flag on cmd line
 
-// PULONG_PTR aPFNs;
+#ifdef CHECK_PFNS
+PULONG_PTR aPFNs;
+#endif
 
 
 BOOL
@@ -253,9 +250,6 @@ initPTEarray(ULONG_PTR numPages)
         exit(-1);
     }
 
-    InitializeCriticalSection(&PTELock);
-
-
 }
 
 
@@ -272,13 +266,29 @@ initPageFile(ULONG_PTR diskSize)
     }
 
     //TODO - reserves extra spot for page trade?
-    // InterlockedIncrement(&totalCommittedPages);  // TODO
+
+    #ifndef PAGEFILE_OFF
+
+    for (int i = 0; i < NUM_THREADS + 5; i++) {
+        InterlockedIncrement64(&totalCommittedPages); // (currently used as a "working " page)
+
+    }
+    InterlockedIncrement64(&totalCommittedPages); // (currently used as a "working " page)
+
+    #else
+    for (int i = 0; i < PAGEFILE_PAGES; i++ ){
+        InterlockedIncrement64(&totalCommittedPages); // (currently used as a "working " page)
+
+    }
+    #endif
+
 
 }
 
 
 ULONG_PTR
-allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs) {
+allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs) 
+{
 
     // secure privilege for the code
     BOOL privResult;
@@ -542,8 +552,6 @@ freePageTestThread(HANDLE terminationHandle)
 VOID
 releaseAwaitingFreePFN(PPFNdata PFNtoFree)
 {
-
-    ASSERT(PFNtoFree->pageFileOffset != INVALID_BITARRAY_INDEX);
         
     clearPFBitIndex(PFNtoFree->pageFileOffset);
 
@@ -557,15 +565,19 @@ releaseAwaitingFreePFN(PPFNdata PFNtoFree)
 }
 
 
+
+volatile ULONG_PTR ctrs[2];
+
 BOOLEAN
 modifiedPageWriter()
 {
 
     BOOLEAN wakeModifiedWriter;
+    PPFNdata PFNtoWrite;
+
     wakeModifiedWriter = FALSE;
 
     PRINT("[modifiedPageWriter] modifiedListCount == %llu\n", modifiedListHead.count);
-    PPFNdata PFNtoWrite;
 
     //
     // Return page with lock bits set
@@ -588,18 +600,27 @@ modifiedPageWriter()
 
     ASSERT(PFNtoWrite->pageFileOffset == INVALID_BITARRAY_INDEX);
     
+    //
+    // Release PFN lock: write in progress bit has been set, status bits have
+    // been set to modified. Page can be decommitted or re-modified
+    //
+
     releaseJLock(&PFNtoWrite->lockBits);
 
     ULONG_PTR expectedSig;
     expectedSig = (ULONG_PTR) leafVABlock + ( ( PFNtoWrite->PTEindex ) << PAGE_SHIFT );
 
+    //
+    // Write page to pagefile - can no longer be accessed since write in progress is set
+    //
 
-    // write page out - can no longer be accessed since write in progress is one
     BOOLEAN bResult;
     bResult = writePageToFileSystem(PFNtoWrite, expectedSig);
 
+    //
+    // Re-acquire PFN lock post-pagefile write
+    //
 
-    // Acquire lock to view PFN
     acquireJLock(&PFNtoWrite->lockBits);
 
     // since we've marked the PFN as write in progress, it CANNOT be in zero or free state
@@ -623,25 +644,55 @@ modifiedPageWriter()
         releaseJLock(&PFNtoWrite->lockBits);
 
         return TRUE;
+
     }
 
+    //
+    // If filesystem write fails
+    //
 
-    // if write failed or the PFN has since been modified
-    if (bResult != TRUE || PFNtoWrite->remodifiedBit == 1) {
+    if (bResult != TRUE) {
+
+        clearPFBitIndex(PFNtoWrite->pageFileOffset);
+
+        PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
+
+        // If the page has not since been faulted in, re-enqueue to modified list
+        // (since page has either failed write or been re-modified, i.e. write->write fault->trim)
+        if (PFNtoWrite->statusBits != ACTIVE) {
+
+            wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoWrite);
+
+        }
+
+        releaseJLock(&PFNtoWrite->lockBits);
+
+
+        PRINT("[modifiedPageWriter] error writing out page\n");
+
+        
+        return FALSE;
+
+    }
+
+    //
+    // If page has been re-modified
+    //
+
+    if (PFNtoWrite->remodifiedBit == 1) {
 
         //
         // Since write failure (bRes == FALSE) would leave pagefile offset as invalid
         //
         
-        if (PFNtoWrite->remodifiedBit == 1) {
-            ASSERT(PFNtoWrite->pageFileOffset != INVALID_BITARRAY_INDEX);
 
-        }
+        ASSERT(PFNtoWrite->pageFileOffset != INVALID_BITARRAY_INDEX);
+
+        PFNtoWrite->remodifiedBit = 0;
             
 
         // either way (write failed/PFN modified), clear PF index if it exists
         clearPFBitIndex(PFNtoWrite->pageFileOffset);
-
 
         PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
 
@@ -656,11 +707,21 @@ modifiedPageWriter()
 
         releaseJLock(&PFNtoWrite->lockBits);
 
-        if (bResult != TRUE) {
-            PRINT("[modifiedPageWriter] error writing out page\n");
-        }  else {
-            PRINT("[modifiedPageWriter] Page has since been modified, clearing PF space\n");
+        if (wakeModifiedWriter == TRUE) {
+            
+            BOOL bRes;
+            bRes = SetEvent(wakeModifiedWriterHandle);
+
+            if (bRes != TRUE) {
+                PRINT_ERROR("[trimPTE] failed to set event\n");
+            }
+
+            ResetEvent(wakeModifiedWriterHandle); // todo - make sure this is accurate. Tied to mod writer
+
         }
+
+        PRINT("[modifiedPageWriter] Page has since been modified, clearing PF space\n");
+
         
         return TRUE;
     }
@@ -691,12 +752,26 @@ modifiedPageWriter()
     } 
     else {
 
+        ctrs[0]++;
+
         ASSERT(currPTE->u1.hPTE.validBit == 1);             // TODO - note this has caused error
                                                             // Syncrhonization issue: cannot read PTE without a lock
                                                             // possible solution: include a modified bit in PFN that is cleared when
                                                             // filesystemwrite begins, set when another thread tries to clear space
                                                             // but can't do to write in progress, and replace line 689
                                                             // with a check of that bit instead
+        // if (PFNtoWrite->dirtyBit == 1) {        // TODO
+            
+        //     // free PF location from PFN
+        //     clearPFBitIndex(PFNtoWrite->pageFileOffset);
+
+        //     // clear pagefile pointer out of PFN
+        //     PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
+            
+        //     PRINT(" - Page has since been write faulted (discarding PF space)\n");
+
+        // }
+
 
         if (currPTE->u1.hPTE.dirtyBit == 1) {
 
@@ -708,22 +783,13 @@ modifiedPageWriter()
             
             PRINT(" - Page has since been write faulted (discarding PF space)\n");
 
+            ctrs[1]++;
+
         }
     }
 
 
     releaseJLock(&PFNtoWrite->lockBits);
-
-    if (wakeModifiedWriter == TRUE) {
-        
-        BOOL bRes;
-        bRes = SetEvent(wakeModifiedWriterHandle);
-
-        if (bRes != TRUE) {
-            PRINT_ERROR("[trimPTE] failed to set event\n");
-        }
-    }
-
 
     return TRUE;   
 
@@ -740,17 +806,20 @@ modifiedPageThread(HANDLE terminationHandle)
     // create local handle array
     HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
-    // handleArray[1] = modifiedListHead.newPagesEvent;
-    handleArray[1] = wakeModifiedWriterHandle;
+    // handleArray[1] = wakeModifiedWriterHandle;       // TODO
+    handleArray[1] = modifiedListHead.newPagesEvent;
+
 
 
     // write out modified pages to pagefile until modified page list empty
     while (TRUE) {
+
         BOOLEAN bres;
         bres = modifiedPageWriter();
+
         if (bres == FALSE) {
 
-            DWORD retVal = WaitForMultipleObjects(2, handleArray, FALSE, INFINITE);
+            DWORD retVal = WaitForMultipleObjects(2, handleArray, FALSE, 1000);
             DWORD index = retVal - WAIT_OBJECT_0;
 
             if (index == 0) {
@@ -785,19 +854,27 @@ faultAndAccessTest()
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
 
-    bRes = commitVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);     // commits with READ_ONLY permissions
+    // bRes = commitVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);     // commits with READ_ONLY permissions
     // protectVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);   // converts to read write
 
-    if (bRes != TRUE) {
+    // if (bRes != TRUE) {
 
-        DebugBreak();
+    //     PRINT("Unable to commit pages \n");
 
-    }
+    // }
 
 
     for (int i = 0; i < virtualMemPages; i++) {
 
         faultStatus testStatus;
+        bRes = commitVA(testVA, READ_WRITE, 1);     // commits with READ_ONLY permissions
+
+        // if (bRes != TRUE) {
+
+        //     PRINT_ALWAYS("Unable to commit pages \n");      // TODO
+
+        // }
+
 
         //
         // Write->Trim->Access
@@ -899,12 +976,13 @@ faultAndAccessTest()
 
 
 DWORD WINAPI
-faultAndAccessTestThread(HANDLE terminationHandle) {
+faultAndAccessTestThread(HANDLE terminationHandle) 
+{
 
     #ifdef CONTINUOUS_FAULT_TEST
 
-    while (TRUE)
-    {
+    while (TRUE) {
+        
         // write out modified pages to pagefile until modified page list empty
         BOOLEAN bres;
         bres = faultAndAccessTest();
@@ -917,6 +995,7 @@ faultAndAccessTestThread(HANDLE terminationHandle) {
             continue;
         }
         else if (waitRes == WAIT_OBJECT_0) {
+            PRINT_ALWAYS("faultAndAccessTest thread exiting\n");
             return 0;
         } else if (waitRes == WAIT_ABANDONED) {
             PRINT_ERROR("wait abandoned\n");
@@ -924,6 +1003,7 @@ faultAndAccessTestThread(HANDLE terminationHandle) {
         } else if (waitRes == WAIT_FAILED) {
             PRINT_ERROR("wait failed\n");
         }
+
     }
 
     #else
@@ -946,15 +1026,39 @@ trimValidPTEs()
     PPTE currPTE;
     PPTE endPTE;
     ULONG_PTR numTrimmed;
+    ULONG_PTR PTEsInRange;
+    BOOLEAN trimActive;
+    
+    ULONG_PTR numAvailablePages;
 
+    trimActive = FALSE;
+
+    //
+    // Calculate PTEs in range
+    //
+
+    PTEsInRange = (((ULONG_PTR)leafVABlockEnd - (ULONG_PTR)leafVABlock) / PAGE_SIZE);
+
+    endPTE = PTEarray + PTEsInRange;
+
+    //
+    // Randomize starting PTE
+    //
 
     currPTE = PTEarray;
 
-    endPTE = PTEarray + (((ULONG_PTR)leafVABlockEnd - (ULONG_PTR)leafVABlock) / PAGE_SIZE);
+    currPTE += (GetTickCount() % PTEsInRange);
 
     numTrimmed = 0;
 
-    for (currPTE; currPTE < endPTE; currPTE++ ) {
+    // for (currPTE; currPTE < endPTE; currPTE++ ) {
+    for (int i = 0; i < PTEsInRange; i++) {
+
+        if (currPTE == endPTE) {
+
+            currPTE = PTEarray;
+
+        }
 
         //
         // If currPTE is valid/active
@@ -970,12 +1074,18 @@ trimValidPTEs()
             //
 
             if (currPTE->u1.hPTE.agingBit == 1) {
+
                 BOOLEAN bRes;
                 bRes = trimPTE(currPTE);
+
                 if (bRes == FALSE) {
+
                     DebugBreak();
+
                 } else {
+
                     numTrimmed++;
+                    
                 }
             }
             else {
@@ -987,8 +1097,93 @@ trimValidPTEs()
         }
 
         releasePTELock(currPTE);
+        
+        currPTE++;
 
     }
+
+    //
+    // Randomize starting PTE
+    //
+
+    currPTE = PTEarray;
+
+    currPTE += (GetTickCount() % PTEsInRange);
+
+    //
+    // Calculate approximate number of available pages
+    // (no listhead lock acquisition, so subject to error)
+    //
+
+    numAvailablePages = 0;
+    for (int i = 0; i < STANDBY + 1; i ++ ) {
+        EnterCriticalSection(&listHeads[i].lock);
+
+        numAvailablePages += listHeads[i].count;
+    }
+
+    for (int i = STANDBY; i >= 0; i--) {
+
+        LeaveCriticalSection(&listHeads[i].lock);
+
+    }
+
+
+    if (numAvailablePages < MIN_AVAILABLE_PAGES) {
+
+        ULONG_PTR numPTEsToTrim;
+
+        numPTEsToTrim = MIN_AVAILABLE_PAGES - numAvailablePages + 20;
+
+        //
+        // Randomize starting PTE
+        //
+
+        currPTE = PTEarray;
+
+        currPTE += (GetTickCount() % PTEsInRange);
+
+        for (int i = 0; i < numPTEsToTrim; i++) {
+
+            if (currPTE == endPTE) {
+
+                currPTE = PTEarray;
+
+            }
+
+            //
+            // If currPTE is valid/active
+            //
+
+            acquirePTELock(currPTE);        // TODO - make a copy of snap PTE and edit that indivisibly
+
+
+            if (currPTE->u1.hPTE.validBit == 1) {
+
+                BOOLEAN bRes;
+                bRes = trimPTE(currPTE);
+
+                if (bRes == FALSE) {
+
+                    DebugBreak();
+
+                } else {
+
+                    numTrimmed++;
+                    
+                }
+
+
+            }
+
+            releasePTELock(currPTE);
+        
+            currPTE++;
+        }
+
+    }
+
+
     return numTrimmed;
 
 
@@ -996,7 +1191,8 @@ trimValidPTEs()
 
 
 DWORD WINAPI
-trimValidPTEThread(HANDLE terminationHandle) {
+trimValidPTEThread(HANDLE terminationHandle) 
+{
 
     // write out modified pages to pagefile until modified page list empty
     ULONG_PTR numTrimmed;
@@ -1006,28 +1202,109 @@ trimValidPTEThread(HANDLE terminationHandle) {
     // create local handle array
     HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
-    handleArray[1] = availablePagesLowHandle;
+    handleArray[1] = wakeTrimHandle;
 
     while (TRUE) {
 
         DWORD retVal;
-        retVal = WaitForMultipleObjects(2, handleArray, FALSE, INFINITE);
+
+        //
+        // Note: efficacy is tied to implementation of checkAvailablePages,
+        // where this could deadlock if there was no timeout while
+        // waiting on this event. This scenario could occur if all
+        // trimming threads were actively trimming and this dequeue 
+        // was called by a pagefault, that in turn waited infinitely
+        // on new page events.
+        //
+
+        retVal = WaitForMultipleObjects(2, handleArray, FALSE, 200);
 
         DWORD index = retVal - WAIT_OBJECT_0;
 
         if (index == 0) {
+
             PRINT_ALWAYS("trimPTEthread - numPTEs trimmed : %llu\n", numTrimmed);
             return 0;
-        }
+
+        } 
 
         ULONG_PTR currNum;
-        currNum = trimValidPTEs();
+        currNum = trimValidPTEs();      // TODO (potential issue with wait)
+        // currNum += trimValidPTEs();
+        // currNum += trimValidPTEs();
+        // currNum += trimValidPTEs();
 
         numTrimmed += currNum;
     }
 
     return 0;
 }
+
+#ifdef CHECK_PFNS
+
+volatile BOOLEAN checkPages;
+
+
+DWORD WINAPI
+checkPageStatusThread(HANDLE terminationHandle) 
+{
+
+
+    while (TRUE) {
+
+        if (checkPages) {
+
+            PPFNdata currPFN;
+
+            ULONG_PTR numPages = 0;
+
+            for (int j = 0; j < numPagesReturned; j++) {
+
+                currPFN = PFNarray + aPFNs[j];
+
+                acquireJLock(&currPFN->lockBits);
+                
+                if (currPFN->statusBits != MODIFIED) {
+
+                    DebugBreak();
+
+                }
+
+                numPages++;
+
+                releaseJLock(&currPFN->lockBits);
+            }
+
+            PRINT_ALWAYS("numpages: %llu\n", numPages);
+
+
+        }
+
+        DWORD retVal;
+
+        retVal = WaitForSingleObject(terminationHandle, 200);
+
+        if (retVal == WAIT_TIMEOUT) {
+            continue;
+        }
+        else if (retVal == WAIT_OBJECT_0) {
+            PRINT_ALWAYS("checkPageStatus thread exiting\n");
+            return 0;
+        } else if (retVal == WAIT_ABANDONED) {
+            PRINT_ERROR("wait abandoned\n");
+
+        } else if (retVal == WAIT_FAILED) {
+            PRINT_ERROR("wait failed\n");
+        }
+
+
+
+    }
+
+    return 0;
+}
+
+#endif
 
 
 VOID
@@ -1052,7 +1329,7 @@ initListHead(PlistData headData)
     headData->count = 0;
 
     HANDLE pagesCreatedHandle;
-    pagesCreatedHandle = CreateEvent(NULL, TRUE, TRUE, NULL);
+    pagesCreatedHandle = CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (pagesCreatedHandle == INVALID_HANDLE_VALUE) {
         PRINT_ERROR("failed to create event handle\n");
@@ -1300,19 +1577,27 @@ testRoutine()
     // Handle to terminate all threads
     //
 
-    HANDLE terminateThreadsHandle;
-    terminateThreadsHandle =  CreateEvent(NULL, TRUE, FALSE, NULL);
+    HANDLE terminateWorkingThreadsHandle;
+    terminateWorkingThreadsHandle =  CreateEvent(NULL, TRUE, FALSE, NULL);
 
-    if (terminateThreadsHandle == INVALID_HANDLE_VALUE) {
+    if (terminateWorkingThreadsHandle == INVALID_HANDLE_VALUE) {
         PRINT_ERROR("failed to create event handle\n");
     }
+
+    HANDLE terminateTestingThreadsHandle;
+    terminateTestingThreadsHandle =  CreateEvent(NULL, TRUE, FALSE, NULL);
+
+    if (terminateTestingThreadsHandle == INVALID_HANDLE_VALUE) {
+        PRINT_ERROR("failed to create event handle\n");
+    }
+
 
     PRINT_ALWAYS(" - %d zeroPage threads\n", NUM_THREADS);
 
     HANDLE zeroPageThreadHandles[NUM_THREADS];
     for (int i = 0; i < NUM_THREADS; i++) {
 
-        zeroPageThreadHandles[i] = CreateThread(NULL, 0, zeroPageThread, terminateThreadsHandle, 0, NULL);
+        zeroPageThreadHandles[i] = CreateThread(NULL, 0, zeroPageThread, terminateWorkingThreadsHandle, 0, NULL);
             
         if (zeroPageThreadHandles[i] == INVALID_HANDLE_VALUE) {
             PRINT_ERROR("failed to create zeroPage handle\n");
@@ -1328,7 +1613,7 @@ testRoutine()
 
     HANDLE freePageTestThreadHandles[NUM_THREADS];
     for (int i = 0; i < NUM_THREADS; i++) {
-        freePageTestThreadHandles[i] = CreateThread(NULL, 0, freePageTestThread, terminateThreadsHandle, 0, NULL);
+        freePageTestThreadHandles[i] = CreateThread(NULL, 0, freePageTestThread, terminateWorkingThreadsHandle, 0, NULL);
 
         if (freePageTestThreadHandles[i] == INVALID_HANDLE_VALUE) {
             PRINT_ERROR("failed to create freePage handle\n");
@@ -1343,7 +1628,7 @@ testRoutine()
     HANDLE modifiedPageWriterThreadHandles[NUM_THREADS];
     for (int i = 0; i < NUM_THREADS; i++) {
 
-        modifiedPageWriterThreadHandles[i] = CreateThread(NULL, 0, modifiedPageThread, terminateThreadsHandle, 0, NULL);
+        modifiedPageWriterThreadHandles[i] = CreateThread(NULL, 0, modifiedPageThread, terminateWorkingThreadsHandle, 0, NULL);
             
         if (modifiedPageWriterThreadHandles[i] == INVALID_HANDLE_VALUE) {
             PRINT_ERROR("failed to create modifiedPageWriting handle\n");
@@ -1357,7 +1642,7 @@ testRoutine()
     HANDLE trimThreadHandles[NUM_THREADS];
     for (int i = 0; i < NUM_THREADS; i++) {
 
-        trimThreadHandles[i] = CreateThread(NULL, 0, trimValidPTEThread, terminateThreadsHandle, 0, NULL);
+        trimThreadHandles[i] = CreateThread(NULL, 0, trimValidPTEThread, terminateWorkingThreadsHandle, 0, NULL);
             
         if (trimThreadHandles[i] == INVALID_HANDLE_VALUE) {
             PRINT_ERROR("failed to create modifiedPageWriting handle\n");
@@ -1373,7 +1658,7 @@ testRoutine()
     HANDLE testHandles[NUM_THREADS];
     for (int i = 0; i < NUM_THREADS; i++) {
 
-        testHandles[i] = CreateThread(NULL, 0, faultAndAccessTestThread, terminateThreadsHandle, 0, NULL);
+        testHandles[i] = CreateThread(NULL, 0, faultAndAccessTestThread, terminateTestingThreadsHandle, 0, NULL);
             
         if (testHandles[i] == INVALID_HANDLE_VALUE) {
             PRINT_ERROR("failed to create modifiedPageWriting handle\n");
@@ -1381,15 +1666,43 @@ testRoutine()
   
     }
 
+    #ifdef CHECK_PFNS
+    HANDLE pageTestThread;
+
+    pageTestThread = CreateThread(NULL, 0, checkPageStatusThread, terminateWorkingThreadsHandle, 0 , NULL);
+    #endif
+
     char quitChar;
     quitChar = 'a';
     while (quitChar != 'q' && quitChar != 'f') {
         quitChar = (char) getchar();
+
+        #ifdef CHECK_PFNS
+        if (quitChar == 'b') {
+            checkPages = !checkPages;
+        }
+        #endif
     }
+    PRINT_ALWAYS("qchar: %c, %d\n", quitChar, quitChar);
+
     PRINT_ALWAYS("Ending program\n");
 
 
-    SetEvent(terminateThreadsHandle);
+
+
+    //
+    // Testing threads MUST exit prior to working threads
+    //
+
+    SetEvent(terminateTestingThreadsHandle);
+
+    WaitForMultipleObjects(NUM_THREADS, testHandles, TRUE, INFINITE);
+
+    //
+    // Set event for working threads
+    //
+
+    SetEvent(terminateWorkingThreadsHandle);
 
     WaitForMultipleObjects(NUM_THREADS, zeroPageThreadHandles, TRUE, INFINITE);
 
@@ -1402,9 +1715,12 @@ testRoutine()
     WaitForMultipleObjects(NUM_THREADS, modifiedPageWriterThreadHandles, TRUE, INFINITE);
     #endif
 
-    WaitForMultipleObjects(NUM_THREADS, trimThreadHandles, TRUE, INFINITE);
+    #ifdef CHECK_PFNS
+    WaitForSingleObject(pageTestThread, INFINITE);
+    #endif
 
-    WaitForMultipleObjects(NUM_THREADS, testHandles, TRUE, INFINITE);
+
+    WaitForMultipleObjects(NUM_THREADS, trimThreadHandles, TRUE, INFINITE);
 
     #endif
 
@@ -1412,23 +1728,25 @@ testRoutine()
 
     /********** Verify no PFNs remain active *********/
 
-    // PPFNdata currPFN;
+    #ifdef CHECK_PFNS
+    PPFNdata currPFN;
 
-    // for (int j = 0; j < numPagesReturned; j++) {
+    for (int j = 0; j < numPagesReturned; j++) {
 
-    //     currPFN = PFNarray + aPFNs[j];
+        currPFN = PFNarray + aPFNs[j];
 
-    //     acquireJLock(&currPFN->lockBits);
-    //     if (currPFN->statusBits > MODIFIED) {
+        acquireJLock(&currPFN->lockBits);
+        if (currPFN->statusBits > MODIFIED) {
 
-    //         DebugBreak();
+            DebugBreak();
 
-    //     }
+        }
 
-    //     releaseJLock(&currPFN->lockBits);
+        releaseJLock(&currPFN->lockBits);
 
 
-    // }
+    }
+    #endif
 
     ULONG_PTR pageCount;
     pageCount = 0;
@@ -1448,14 +1766,14 @@ testRoutine()
 VOID
 initHandles()
 {
-    availablePagesLowHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
+    wakeTrimHandle = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-    if (availablePagesLowHandle == INVALID_HANDLE_VALUE) {
+    if (wakeTrimHandle == INVALID_HANDLE_VALUE) {
         PRINT_ERROR("failed to create event handle\n");
         exit(-1);
     }
 
-    wakeModifiedWriterHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
+    wakeModifiedWriterHandle = CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (wakeModifiedWriterHandle == INVALID_HANDLE_VALUE) {
         PRINT_ERROR("failed to create event handle\n");
@@ -1468,7 +1786,7 @@ BOOL
 closeHandles()
 {
     BOOL bRes;
-    bRes = CloseHandle(availablePagesLowHandle);
+    bRes = CloseHandle(wakeTrimHandle);
 
     if (bRes != TRUE) {
 
@@ -1494,8 +1812,12 @@ initializeVirtualMemory()
     // initialize zero/free/standby lists 
     initListHeads(listHeads);
 
+    #ifndef PAGEFILE_OFF
     // memset the pageFile bit array
     memset(&pageFileBitArray, 0, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );
+    #else
+    memset(&pageFileBitArray, 1, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );       // TODO
+    #endif
 
     //
     // Initialize pagefile critical section
@@ -1503,11 +1825,22 @@ initializeVirtualMemory()
     InitializeCriticalSection(&pageFileLock);
 
     // allocate an array of PFNs that is returned by AllocateUserPhysPages
-    PULONG_PTR aPFNs;
+
+    #ifndef CHECK_PFNS
+
+    //
+    // if CHECK_PFNS flag is not set, declare aPFNs locally (since it can be freed locally as well)
+    //
+
+    PULONG_PTR aPFNs;  
+    #endif
+
     aPFNs = VirtualAlloc(NULL, NUM_PAGES*(sizeof(ULONG_PTR)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     
     if (aPFNs == NULL) {
+
         PRINT_ERROR("failed to allocate PFNarray\n");
+
     }
 
     numPagesReturned = allocatePhysPages(NUM_PAGES, aPFNs);
@@ -1549,8 +1882,10 @@ initializeVirtualMemory()
     // create local PFN metadata array
     initPFNarray(aPFNs, numPagesReturned);
 
+    #ifndef CHECK_PFNS
     // Free PFN array (no longer used)
     VirtualFree(aPFNs, 0, MEM_RELEASE);
+    #endif
 
     // create local PTE array to map VAs to pages
     initPTEarray(virtualMemPages);

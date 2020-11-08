@@ -7,27 +7,61 @@ checkAvailablePages(PFNstatus dequeuedStatus)
 {
 
     // conditional covers zero, free, and standby (since they are smaller in the enum)
-    if (dequeuedStatus <= STANDBY) {
+    // if (dequeuedStatus <= STANDBY) {
+    if (dequeuedStatus <= ACTIVE) {
+
 
         // calculate available pages
         ULONG_PTR availablePageCount;
-        availablePageCount = zeroListHead.count + freeListHead.count + standbyListHead.count;
+        availablePageCount = 0;
+        
+        //
+        // Acquire page listhead locks in order to calculate page counts accurately
+        //
+
+        for (int i = 0; i < STANDBY + 1; i++) {
+
+            EnterCriticalSection(&listHeads[i].lock);
+            availablePageCount += listHeads[i].count;
+            
+        }
 
     
-        if (availablePageCount < 10) {
-
+        if (availablePageCount < MIN_AVAILABLE_PAGES) {
+        
             //
             // Set event, signaling trimming thread to resume trimming active pages
             // and replenish the available pages lists
             //
 
             BOOL bRes;
-            bRes = SetEvent(availablePagesLowHandle); 
+            bRes = SetEvent(wakeTrimHandle); 
 
             if (bRes != TRUE) {
                 PRINT_ERROR("Failed to set event successfully\n");
             }
-            
+
+            //
+            // Note: efficacy is tied to implementation of trimValidPTEThread,
+            // where this could deadlock if there was no timeout while
+            // waiting on this event. This scenario could occur if all
+            // trimming threads were actively trimming and this dequeue 
+            // was called by a pagefault, that in turn waited infinitely
+            // on new page events.
+            //
+
+            ResetEvent(wakeTrimHandle);
+
+        }
+
+        //
+        // Release locks in reverse order of acquisition
+        //
+
+        for (int i = STANDBY; i >= 0; i--) {
+
+            LeaveCriticalSection(&listHeads[i].lock);
+
         }
 
     }
@@ -53,6 +87,7 @@ enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem)
 BOOLEAN
 enqueuePage(PlistData listHead, PPFNdata PFN)
 {
+
     BOOLEAN wakeModifiedWriter;
     PFNstatus listStatus;
 
@@ -76,19 +111,22 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
     listStatus = listHead - listHeads;
 
     if (listStatus == MODIFIED) {
-        if (listHead->count > 10) {
+
+        if (listHead->count > 10) {     // TODO - don't hardcode limit
+            // PRINT_ALWAYS("status = modified\n");
             wakeModifiedWriter = TRUE;
         }
+        
     }
 
     // unlock listHead
     LeaveCriticalSection(&(listHead->lock));
 
-
     // set statusBits to the list we've just enqueued the page on
     PFN->statusBits = listStatus;
 
     return wakeModifiedWriter;
+
 }
 
 
@@ -122,8 +160,6 @@ dequeuePage(PlistData listHead)
     listHead->count--;
 
     returnPFN = CONTAINING_RECORD(returnLink, PFNdata, links);
-
-    checkAvailablePages(returnPFN->statusBits);
 
     returnPFN->statusBits = NONE;
 
@@ -163,19 +199,24 @@ dequeueLockedPage(PlistData listHead, BOOLEAN returnLocked)
         // - if not, release lock and try again
 
         // release held locks (in diverging order in terms of "hotness")
-        LeaveCriticalSection(&(listHead->lock));
+        LeaveCriticalSection(&listHead->lock);
 
         releaseJLock(&(headPFN->lockBits));
 
     }
 
     PPFNdata returnPFN;
+
     returnPFN = dequeuePage(listHead);
 
     ASSERT(returnPFN == headPFN);
 
     LeaveCriticalSection(&(listHead->lock));
 
+    PFNstatus dequeueStatus;
+    dequeueStatus = listHead - listHeads;
+
+    checkAvailablePages(dequeueStatus);
     // check "returnLocked" boolean flag
     if (returnLocked == TRUE) {
         return returnPFN;
@@ -232,8 +273,6 @@ dequeuePageFromTail(PlistData listHead)
     
     returnPFN = CONTAINING_RECORD(returnLink, PFNdata, links);
 
-    checkAvailablePages(returnPFN->statusBits);
-
     returnPFN->statusBits = NONE;
 
     return returnPFN;
@@ -279,11 +318,17 @@ dequeueLockedPageFromTail(PlistData listHead, BOOLEAN returnLocked)
     }
 
     PPFNdata returnPFN;
+
     returnPFN = dequeuePageFromTail(listHead);
 
     ASSERT(returnPFN == tailPFN);
 
     LeaveCriticalSection(&(listHead->lock));
+
+    PFNstatus dequeueStatus;
+    dequeueStatus = listHead - listHeads;
+
+    checkAvailablePages(dequeueStatus);
 
     // check "returnLocked" boolean flag
     if (returnLocked == TRUE) {
@@ -392,7 +437,7 @@ dequeueLockedVA(PlistData listHead)
         headNode = CONTAINING_RECORD(headLink, VANode, links);
 
         //lock listHead (since listHead values are not changed/accessed until dereferenced)
-        EnterCriticalSection(&(listHead->lock));
+        EnterCriticalSection(&listHead->lock);
 
         // verify node remains at head of list
         if (headLink == (listHead->head).Flink) {
@@ -513,7 +558,9 @@ dequeueLockedEvent(PlistData listHead)
     bResult = ResetEvent(returnNode->event);
     
     if (bResult != TRUE) {
+
         PRINT_ERROR("[dequeueLockedEvent] unable to reset event\n");
+
     }
 
     LeaveCriticalSection(&listHead->lock);

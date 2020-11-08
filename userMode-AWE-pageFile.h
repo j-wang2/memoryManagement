@@ -14,8 +14,10 @@
 
 /*********** temporary testing macros ************/
 // #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
-#define TEMP_TESTING                                // temporary workaround for PF due to 
-#define NUM_THREADS 2
+#define CHECK_PFNS
+#define PAGEFILE_OFF
+#define TEMP_TESTING                                // temporary workaround for PF due to app verifier
+#define NUM_THREADS 5
 #define TESTING_ZERO                                // toggles zero page thread
 #define TESTING_MODIFIED                            // toggles modified page writer thread
 #define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
@@ -27,12 +29,14 @@
 
 
 /*********** number of physical memory pages to allocate (+ PF pages for total memory) **********/
-// #define NUM_PAGES 30
+// #define NUM_PAGES 6
 #define NUM_PAGES 512
 // #define NUM_PAGES 2048
 // #define NUM_PAGES 64000
 
-#define VM_MULTIPLIER 1                          // VM space is this many times larger than num physical pages successfully allocated
+#define MIN_AVAILABLE_PAGES 100
+
+#define VM_MULTIPLIER 2                          // VM space is this many times larger than num physical pages successfully allocated
 
 
 /********** PTE bit macros *************/
@@ -47,6 +51,8 @@
 
 
 /*********** pagefile macros ***************************/
+// #define PAGEFILE_PAGES 17                           // capacity of pagefile pages (+ NUM_PAGES for total memory)
+
 #define PAGEFILE_PAGES 512                          // capacity of pagefile pages (+ NUM_PAGES for total memory)
 #define PAGEFILE_SIZE PAGEFILE_PAGES*PAGE_SIZE      // total pagefile size 
 #define PAGEFILE_BITS 20                            // actually 2^19 currently
@@ -122,10 +128,11 @@ typedef struct _PFNdata {
     ULONG64 statusBits: 5;
     ULONG64 pageFileOffset: PAGEFILE_BITS;
     ULONG64 PTEindex: PTE_INDEX_BITS;
-    ULONG64 writeInProgressBit: 1;          // also used to signify to page trader that page could be being zeroed
+    ULONG64 writeInProgressBit: 1;          // Overloaded bit - also used to signify to page trader that page could be being zeroed
     ULONG64 readInProgressBit: 1;
-    ULONG64 refCount: 16;
+    ULONG64 refCount: 16;                
     ULONG64 remodifiedBit: 1;        
+    ULONG64 dirtyBit: 1;                // TODO 
     volatile LONG lockBits;                // 31 free bits if necessary
     PeventNode readInProgEventNode;
     HANDLE readInProgEvent;
@@ -228,7 +235,7 @@ extern CRITICAL_SECTION PTELock;            // coarse-grained lock on page table
 extern PCRITICAL_SECTION PTELockArray;      // finer-grained lock array for page table/directory (replaces above)
 
 
-extern HANDLE availablePagesLowHandle;
+extern HANDLE wakeTrimHandle;
 
 extern HANDLE wakeModifiedWriterHandle;
 

@@ -122,8 +122,6 @@ acquirePTELock(PPTE currPTE)
 
     EnterCriticalSection(&PTELockArray[lockIndex]);
 
-    // EnterCriticalSection(&PTELock);
-
 }
 
 
@@ -134,10 +132,9 @@ releasePTELock(PPTE currPTE)
     ULONG_PTR lockIndex;
 
     lockIndex = getLockIndex(currPTE);
+
     LeaveCriticalSection(&PTELockArray[lockIndex]);
     
-    // LeaveCriticalSection(&PTELock);
-
 }
 
 

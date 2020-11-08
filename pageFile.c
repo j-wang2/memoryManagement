@@ -19,11 +19,22 @@ setPFBitIndex()
 
         for (ULONG_PTR j = 0; j < (sizeof(currFrame) * 8); j++) {
 
-            // free
+            //
+            // If the current bit is clear, set the bit and return the
+            // bitIndex
+            //
+
             if ((currFrame & 1) == 0) {
 
                 // reset currFrame
                 currFrame = pageFileBitArray[i];
+
+                //
+                // Assert the current bit is clear
+                //
+                
+                ASSERT( ( currFrame & ((ULONG_PTR)1 << j) ) == 0);
+
 
                 // set the bit
                 currFrame |= ((ULONG_PTR)1 << j);
@@ -31,15 +42,19 @@ setPFBitIndex()
                 // set the frame in the bitarray to the edited frame
                 pageFileBitArray[i] = currFrame;
 
+                LeaveCriticalSection(&pageFileLock);
+
                 // calculate bitIndex
                 bitIndex = (i * (sizeof(currFrame)) * 8) + j;
 
-                LeaveCriticalSection(&pageFileLock);
-
                 return bitIndex;
+
             }
-            currFrame >>= 1;     
+
+            currFrame >>= 1;   
+
         }
+
     }
 
     LeaveCriticalSection(&pageFileLock);
@@ -76,6 +91,13 @@ clearPFBitIndex(ULONG_PTR pfVA)
 
 
     currFrame = pageFileBitArray[i];
+
+    //
+    // Assert bit is previously set
+    //
+
+    ASSERT ( currFrame & (ULONG_PTR)1 << j );
+
     currFrame &= ~((ULONG_PTR)1 << j);
 
     pageFileBitArray[i] = currFrame;
@@ -171,10 +193,12 @@ writePageToFileSystem(PPFNdata PFNtoWrite, ULONG_PTR expectedSig)
 
     PFNtoWrite->pageFileOffset = bitIndex;
 
+    // PFNtoWrite->dirtyBit = 0;      // TODO
+
     releaseJLock(&PFNtoWrite->lockBits);
 
-
     PRINT("successfully wrote page to pagefile\n");
+
     return TRUE;
 }
 

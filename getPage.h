@@ -32,6 +32,9 @@ getFreePage(BOOLEAN returnLocked);
  *  - updates PTE to pfPTE format, and zeroes page before returning
  *  - DOES NOT write out (since pulling off standby list, is either already in PF or zero)
  *  - called by getPage
+ *  - WARNING: since PTE lock is not acquired here, any other function reading
+ *     a transition format PFN MUST acquire page lock and then verify the PTE 
+ *     has not changed to PF format
  * 
  * Returns PPFNdata
  *  - returnPFN (pfn metadata for the returned page) on success
