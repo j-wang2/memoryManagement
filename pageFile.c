@@ -3,7 +3,7 @@
 // #include "pagefile.h"
 #include "jLock.h"
 
-
+#ifndef PAGEFILE_PFN_CHECK
 ULONG_PTR
 setPFBitIndex()
 {
@@ -62,6 +62,61 @@ setPFBitIndex()
     return INVALID_BITARRAY_INDEX;
     
 }
+#else
+
+ULONG_PTR
+setPFDebugIndex(PPFNdata currPFN)
+{
+
+    pageFileDebug currEntry;
+    PPageFileDebug checkEntry;
+
+    acquireJLock(&currPFN->lockBits);
+
+    currEntry.currPFN = currPFN;
+    currEntry.PFNdata = *currPFN;
+
+    ULONG_PTR PTEindex;
+    PTEindex = currPFN->PTEindex;
+
+    PPTE currPTE;
+    currPTE = PTEarray + PTEindex;
+
+    currEntry.currPTE = currPTE;
+    currEntry.PTEdata = *currPTE;
+
+    for (ULONG_PTR j = 0; j < PAGEFILE_PAGES; j++) {
+
+        checkEntry = pageFileDebugArray + j;
+        ULONG_PTR checkPTEindex = checkEntry->currPTE - PTEarray;
+
+        ASSERT(PTEindex != checkPTEindex);
+
+    }
+
+    EnterCriticalSection(&pageFileLock);
+
+    for (ULONG_PTR i = 0; i < PAGEFILE_PAGES; i++) {
+
+        if (pageFileDebugArray[i].currPFN == NULL && pageFileDebugArray[i].currPTE == NULL) {
+
+            pageFileDebugArray[i] = currEntry;
+            LeaveCriticalSection(&pageFileLock);
+            releaseJLock(&currPFN->lockBits);
+
+            return i;
+
+        }
+
+    }
+    LeaveCriticalSection(&pageFileLock);
+
+    releaseJLock(&currPFN->lockBits);
+    return INVALID_BITARRAY_INDEX;
+    
+}
+
+#endif
 
 
 VOID
@@ -74,6 +129,22 @@ clearPFBitIndex(ULONG_PTR pfVA)
         return;
 
     }
+
+    #ifdef PAGEFILE_PFN_CHECK
+
+        pageFileDebug temp = { 0 };
+
+        EnterCriticalSection(&pageFileLock);
+
+        ASSERT(memcmp(&pageFileDebugArray[pfVA], &temp, sizeof(temp)) != 0 );
+
+        memset(&pageFileDebugArray[pfVA], 0, sizeof(pageFileDebug) );
+
+        LeaveCriticalSection(&pageFileLock);
+
+        return;
+
+    #else
 
     // keeps track of byte increments (i.e. "bytes place")
     ULONG_PTR i;
@@ -104,7 +175,7 @@ clearPFBitIndex(ULONG_PTR pfVA)
 
     LeaveCriticalSection(&pageFileLock);
 
-
+    #endif
 }
 
 
@@ -132,7 +203,12 @@ writePageToFileSystem(PPFNdata PFNtoWrite, ULONG_PTR expectedSig)
     PFN = PFNtoWrite - PFNarray;
 
     ULONG_PTR bitIndex;
-    bitIndex = setPFBitIndex();
+
+    #ifdef PAGEFILE_PFN_CHECK
+        bitIndex = setPFDebugIndex(PFNtoWrite);
+    #else
+        bitIndex = setPFBitIndex();
+    #endif
 
 
     if (bitIndex == INVALID_BITARRAY_INDEX) {
@@ -193,13 +269,12 @@ writePageToFileSystem(PPFNdata PFNtoWrite, ULONG_PTR expectedSig)
 
     PFNtoWrite->pageFileOffset = bitIndex;
 
-    // PFNtoWrite->dirtyBit = 0;      // TODO
-
     releaseJLock(&PFNtoWrite->lockBits);
 
     PRINT("successfully wrote page to pagefile\n");
 
     return TRUE;
+
 }
 
 

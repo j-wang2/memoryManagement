@@ -374,7 +374,8 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
                 transferPTEpermissions(&tempPTE, RWEpermissions);
 
-            } else if (tempPTE.u1.tPTE.transitionBit == 1) {
+            } 
+            else if (tempPTE.u1.tPTE.transitionBit == 1) {
 
                 PPFNdata transPFN;
                 transPFN = PFNarray + tempPTE.u1.tPTE.PFN;
@@ -438,11 +439,13 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
                 continue;
 
 
-            } else if (tempPTE.u1.pfPTE.permissions != NO_ACCESS) {             // covers both pagefile and demand zero cases
+            } 
+            else if (tempPTE.u1.pfPTE.permissions != NO_ACCESS) {             // covers both pagefile and demand zero cases
 
                 tempPTE.u1.pfPTE.permissions = RWEpermissions;
 
-            } else if (tempPTE.u1.ulongPTE == 0 && currVAD->commitBit) {
+            } 
+            else if (tempPTE.u1.ulongPTE == 0 && currVAD->commitBit) {
 
                 tempPTE.u1.dzPTE.pageFileIndex = INVALID_BITARRAY_INDEX;
                 tempPTE.u1.dzPTE.permissions = RWEpermissions;
@@ -580,8 +583,14 @@ trimPTE(PPTE PTEaddress)
     // acquire page lock (prior to viewing/editing PFN fields)
     acquireJLock(&PFNtoTrim->lockBits);
 
-
-    // if write in progress bit is set, modified writer re-enqueues page
+    //
+    // If write in progress bit is set, set the page status bits to 
+    // signify the modified writer to re-enqueue page. If dirty bit is 
+    // clear, PFN can be re-enqueued to standby. If it is set, PFN has been
+    // remodified and thus remodified bit must be set in addition to 
+    // setting status bits to modified.
+    //
+    
     if (PFNtoTrim->writeInProgressBit == 1) {
 
         if (oldPTE.u1.hPTE.dirtyBit == 0) {
@@ -601,13 +610,22 @@ trimPTE(PPTE PTEaddress)
     else {
 
         // check dirtyBit to see if page has been modified
-        if (oldPTE.u1.hPTE.dirtyBit == 0) {
+        if (oldPTE.u1.hPTE.dirtyBit == 0 && PFNtoTrim->dirtyBit == 0) {
 
             // add given VA's page to standby list
             enqueuePage(&standbyListHead, PFNtoTrim);
 
         } 
-        else if (oldPTE.u1.hPTE.dirtyBit == 1) {
+        else {
+
+            // ASSERT (oldPTE.u1.hPTE.dirtyBit == 1);
+
+            //
+            // Since PTE dirty bit is set, we can also clear PFN dirty bit and 
+            // enqueue to modified list
+            //
+
+            PFNtoTrim->dirtyBit = 0;
 
             // add given VA's page to modified list;
             wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoTrim);
@@ -639,7 +657,7 @@ trimPTE(PPTE PTEaddress)
             PRINT_ERROR("[trimPTE] failed to set event\n");
         }
 
-        ResetEvent(wakeModifiedWriterHandle); // todo
+        ResetEvent(wakeModifiedWriterHandle);
 
     }
 
@@ -771,8 +789,6 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
     return TRUE;
 
 }
-
-
 
 
 BOOLEAN
@@ -959,6 +975,8 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
                     clearPFBitIndex(currPFN->pageFileOffset);
 
+                    currPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
+
                 }
 
                 // enqueue Page to free list
@@ -1022,6 +1040,8 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
                 if (currPFN->pageFileOffset != INVALID_BITARRAY_INDEX ) {
 
                     clearPFBitIndex(currPFN->pageFileOffset);
+
+                    currPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
                     
                 }
 

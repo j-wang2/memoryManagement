@@ -95,6 +95,54 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
 
     ASSERT(PFN->lockBits != 0);
 
+    ASSERT(PFN->dirtyBit == 0);
+
+    listStatus = listHead - listHeads;
+
+    //
+    // If list being enqueued to is either free or zero, the PFN
+    // cannot hold pagefile space/hold a pagefile offset in it's 
+    // metadata
+    //
+
+    if (PTEarray != NULL && PFN->PTEindex != 0) {
+    
+        if (listStatus == FREE || listStatus == ZERO) {
+
+            ASSERT(PFN->pageFileOffset == INVALID_BITARRAY_INDEX);
+
+            #ifdef PAGEFILE_PFN_CHECK
+
+            PPTE currPTE;
+            currPTE = PTEarray + PFN->PTEindex;
+
+            PPageFileDebug checkEntry;
+
+            EnterCriticalSection(&pageFileLock);
+
+
+            for (ULONG_PTR j = 0; j < PAGEFILE_PAGES; j++) {
+
+
+                checkEntry = pageFileDebugArray + j;
+
+                if (checkEntry->currPTE != NULL) {
+                    ASSERT(currPTE != checkEntry->currPTE);
+
+                }
+
+
+            }
+
+
+            LeaveCriticalSection(&pageFileLock);
+
+            #endif
+
+        }
+    }
+
+
     //lock listHead (since listHead values are not changed/accessed until dereferenced)
     EnterCriticalSection(&(listHead->lock));
 
@@ -107,8 +155,6 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
     #ifdef MULTITHREADING
     SetEvent(listHead->newPagesEvent);
     #endif
-
-    listStatus = listHead - listHeads;
 
     if (listStatus == MODIFIED) {
 

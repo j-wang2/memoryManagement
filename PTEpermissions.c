@@ -14,7 +14,11 @@ typedef struct _PTETrace{
     PTE oldPTE;
     PTE newPTE;
 
-    PVOID stackTrace[5];
+    ULONG64 padding;
+    PFNdata PFN;
+
+    PVOID stackTrace[2];
+
 
 } PTETrace, *PPTETrace;
 
@@ -30,18 +34,38 @@ writePTE(PPTE dest, PTE value)
     
     #ifdef PTE_CHANGE_LOG
 
+    PPFNdata currPage;
+
     if (value.u1.hPTE.validBit == 1) {
 
-        PPFNdata validPage;
         ULONG_PTR PTEindex;
 
         PTEindex = dest - PTEarray;
 
-        validPage = PFNarray + value.u1.hPTE.PFN;
+        currPage = PFNarray + value.u1.hPTE.PFN;
 
-        ASSERT(validPage->PTEindex == PTEindex);
+        ASSERT(currPage->PTEindex == PTEindex);
 
     }
+    else if (value.u1.tPTE.transitionBit == 1) {
+
+        currPage = PFNarray + value.u1.tPTE.PFN;
+
+    }
+    else if (dest->u1.hPTE.validBit == 1) {
+
+        currPage = PFNarray + dest->u1.hPTE.PFN;
+
+    }
+    else if (dest->u1.tPTE.transitionBit == 1) {
+
+        currPage = PFNarray + dest->u1.tPTE.PFN;
+
+    }
+    else {
+        currPage = NULL;
+    }
+    
 
 
     LONG index;
@@ -57,6 +81,14 @@ writePTE(PPTE dest, PTE value)
     currTrace->oldPTE = *dest;
 
     memset(&currTrace->stackTrace, 0, sizeof(currTrace->stackTrace));
+
+    if (currPage != NULL) {
+        memcpy(&currTrace->PFN, currPage, sizeof(PFNdata));
+
+    } else {
+        memset(&currTrace->PFN, 0, sizeof(PFNdata));
+
+    }
 
     currTrace->stackTrace[0] = (PVOID) _ReturnAddress();
 

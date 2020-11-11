@@ -30,7 +30,12 @@ ULONG64 totalCommittedPages;               // count of committed pages (initiali
 ULONG_PTR totalMemoryPageLimit = NUM_PAGES + (PAGEFILE_SIZE >> PAGE_SHIFT);    // limit of committed pages (memory block + pagefile space)
 
 void* pageFileVABlock;                  // starting address of pagefile "disk" (memory)
+
+#ifdef PAGEFILE_PFN_CHECK
+PPageFileDebug pageFileDebugArray;
+#else 
 ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
+#endif
 
 // Execute-Write-Read (bit ordering)
 ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask | executeMask), (readMask | writeMask | executeMask) };
@@ -225,6 +230,8 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
 
         acquireJLock(&newPFN->lockBits);
 
+        newPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
+
         //
         // add page to free list
         //
@@ -269,7 +276,7 @@ initPageFile(ULONG_PTR diskSize)
 
     #ifndef PAGEFILE_OFF
 
-    for (int i = 0; i < NUM_THREADS + 5; i++) {
+    for (int i = 0; i < 5; i++) {
         InterlockedIncrement64(&totalCommittedPages); // (currently used as a "working " page)
 
     }
@@ -281,7 +288,6 @@ initPageFile(ULONG_PTR diskSize)
 
     }
     #endif
-
 
 }
 
@@ -566,7 +572,7 @@ releaseAwaitingFreePFN(PPFNdata PFNtoFree)
 
 
 
-volatile ULONG_PTR ctrs[2];
+volatile ULONG_PTR ctrs[4];
 
 BOOLEAN
 modifiedPageWriter()
@@ -585,24 +591,36 @@ modifiedPageWriter()
 
     PFNtoWrite = dequeueLockedPage(&modifiedListHead, TRUE);
 
-
     if (PFNtoWrite == NULL) {
+
         PRINT("[modifiedPageWriter] modified list empty - could not write out\n");
         return FALSE;
+
     }
 
+    //
     // Lock has previuosly been acquired - set write in progress bit to 1
+    //
+
     ASSERT(PFNtoWrite->writeInProgressBit == 0);
+
     PFNtoWrite->writeInProgressBit = 1;
 
-    // revert PFN status to modified so that it can once again be faulted
+    //
+    // Revert PFN status to modified so that it can once again be faulted
+    //
+
     PFNtoWrite->statusBits = MODIFIED;
 
     ASSERT(PFNtoWrite->pageFileOffset == INVALID_BITARRAY_INDEX);
     
+    PFNtoWrite->dirtyBit = 0;      // TODO
+
     //
     // Release PFN lock: write in progress bit has been set, status bits have
-    // been set to modified. Page can be decommitted or re-modified
+    // been set to modified, PFN dirty bit has been cleared so that another
+    // faulter can reset it upon checking that write in progress bit is 1.
+    // Page can be now decommitted or re-modified
     //
 
     releaseJLock(&PFNtoWrite->lockBits);
@@ -633,6 +651,7 @@ modifiedPageWriter()
     //
 
     ASSERT(PFNtoWrite->writeInProgressBit == 1);
+
     PFNtoWrite->writeInProgressBit = 0;
 
 
@@ -653,15 +672,31 @@ modifiedPageWriter()
 
     if (bResult != TRUE) {
 
+        //
+        // Since write has failed, re-set PFN dirty bit, clear
+        // PF bit index and clear pagefile offset out of PFN
+        //
+
+
         clearPFBitIndex(PFNtoWrite->pageFileOffset);
 
         PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
 
+        //
         // If the page has not since been faulted in, re-enqueue to modified list
-        // (since page has either failed write or been re-modified, i.e. write->write fault->trim)
+        // (since page has failed the write to pagefile, cannnot be enqueued to 
+        // standby list)
+        //
+
         if (PFNtoWrite->statusBits != ACTIVE) {
 
+            PFNtoWrite->dirtyBit = 0;
+
             wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoWrite);
+
+        } else {
+            
+            PFNtoWrite->dirtyBit = 1;
 
         }
 
@@ -684,22 +719,29 @@ modifiedPageWriter()
         //
         // Since write failure (bRes == FALSE) would leave pagefile offset as invalid
         //
-        
 
         ASSERT(PFNtoWrite->pageFileOffset != INVALID_BITARRAY_INDEX);
 
         PFNtoWrite->remodifiedBit = 0;
             
+        //
+        // Clear pagefile space from bitarray and clear index in PFN
+        //
 
-        // either way (write failed/PFN modified), clear PF index if it exists
         clearPFBitIndex(PFNtoWrite->pageFileOffset);
 
         PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
 
 
         // If the page has not since been faulted in, re-enqueue to modified list
-        // (since page has either failed write or been re-modified, i.e. write->write fault->trim)
+        // (since page has been re-modified, i.e. write->write fault->trim)
         if (PFNtoWrite->statusBits != ACTIVE) {
+
+            //
+            // Clear PFN dirty bit if set, since PFN is reaching modified list
+            //
+
+            PFNtoWrite->dirtyBit = 0;
 
             wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoWrite);
 
@@ -722,6 +764,7 @@ modifiedPageWriter()
 
         PRINT("[modifiedPageWriter] Page has since been modified, clearing PF space\n");
 
+        ctrs[3]++;
         
         return TRUE;
     }
@@ -739,7 +782,7 @@ modifiedPageWriter()
     // if it has been write faulted in, check the dirty bit
     //  - if it is set, clear the PF bit index
     //  - otherwise, continue
-    if (PFNtoWrite->statusBits != ACTIVE) {
+    if (PFNtoWrite->statusBits != ACTIVE && PFNtoWrite->dirtyBit == 0) {
 
         ASSERT(currPTE->u1.hPTE.validBit != 1 && currPTE->u1.tPTE.transitionBit == 1);
 
@@ -760,8 +803,25 @@ modifiedPageWriter()
                                                             // filesystemwrite begins, set when another thread tries to clear space
                                                             // but can't do to write in progress, and replace line 689
                                                             // with a check of that bit instead
-        // if (PFNtoWrite->dirtyBit == 1) {        // TODO
-            
+        if (PFNtoWrite->dirtyBit == 1) {        // TODO
+
+            ctrs[1]++;
+
+            // free PF location from PFN
+            clearPFBitIndex(PFNtoWrite->pageFileOffset);
+
+            // clear pagefile pointer out of PFN
+            PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
+
+            PFNtoWrite->dirtyBit = 0;
+
+            PRINT(" - Page has since been write faulted (discarding PF space)\n");
+
+        }
+
+
+        // if (currPTE->u1.hPTE.dirtyBit == 1) {
+
         //     // free PF location from PFN
         //     clearPFBitIndex(PFNtoWrite->pageFileOffset);
 
@@ -770,22 +830,9 @@ modifiedPageWriter()
             
         //     PRINT(" - Page has since been write faulted (discarding PF space)\n");
 
+        //     ctrs[1]++;
+
         // }
-
-
-        if (currPTE->u1.hPTE.dirtyBit == 1) {
-
-            // free PF location from PFN
-            clearPFBitIndex(PFNtoWrite->pageFileOffset);
-
-            // clear pagefile pointer out of PFN
-            PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
-            
-            PRINT(" - Page has since been write faulted (discarding PF space)\n");
-
-            ctrs[1]++;
-
-        }
     }
 
 
@@ -1277,6 +1324,38 @@ checkPageStatusThread(HANDLE terminationHandle)
 
             PRINT_ALWAYS("numpages: %llu\n", numPages);
 
+            PPageFileDebug currPF;
+
+            EnterCriticalSection(&pageFileLock);
+
+            for (int k = 0; k < PAGEFILE_PAGES; k++) {
+
+                currPF = pageFileDebugArray + k;
+
+                PPFNdata PFN;
+                PFN = currPF->currPFN;
+
+                ULONG_PTR PFNindex;
+                PFNindex = PFN - PFNarray;
+
+                PPageFileDebug secondCurr;
+                PPFNdata secondCurrPFN;
+
+                for (int l = k + 1; l < PAGEFILE_PAGES - 1; l++) {
+
+                    secondCurr = pageFileDebugArray + l;
+
+                    secondCurrPFN = secondCurr->currPFN;
+
+
+                    ASSERT (memcmp(PFN, secondCurrPFN, sizeof(PFNdata) != 0) );
+                }
+
+            }
+
+            LeaveCriticalSection(&pageFileLock);
+
+
 
         }
 
@@ -1285,16 +1364,23 @@ checkPageStatusThread(HANDLE terminationHandle)
         retVal = WaitForSingleObject(terminationHandle, 200);
 
         if (retVal == WAIT_TIMEOUT) {
+
             continue;
+
         }
         else if (retVal == WAIT_OBJECT_0) {
+
             PRINT_ALWAYS("checkPageStatus thread exiting\n");
             return 0;
+
         } else if (retVal == WAIT_ABANDONED) {
+
             PRINT_ERROR("wait abandoned\n");
 
         } else if (retVal == WAIT_FAILED) {
+
             PRINT_ERROR("wait failed\n");
+
         }
 
 
@@ -1367,6 +1453,7 @@ initVAList(PlistData VAListHead, ULONG_PTR numVAs)
     //
     // Call VirtualAlloc for VAs
     //
+
     void* baseVA;
 
     #ifdef MULTIPLE_MAPPINGS
@@ -1813,10 +1900,21 @@ initializeVirtualMemory()
     initListHeads(listHeads);
 
     #ifndef PAGEFILE_OFF
-    // memset the pageFile bit array
-    memset(&pageFileBitArray, 0, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );
+
+        #ifndef PAGEFILE_PFN_CHECK
+
+        // memset the pageFile bit array
+            memset(&pageFileBitArray, 0, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );
+
+        #else
+            pageFileDebugArray = VirtualAlloc(NULL, sizeof(pageFileDebug)*PAGEFILE_PAGES, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE );
+            memset(pageFileDebugArray, 0, PAGEFILE_PAGES * sizeof(pageFileDebug ));
+        #endif
+
     #else
-    memset(&pageFileBitArray, 1, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );       // TODO
+
+        memset(&pageFileBitArray, 1, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );
+    
     #endif
 
     //

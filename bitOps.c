@@ -12,7 +12,7 @@ reserveBitRange(ULONG_PTR bits, PULONG_PTR bitArray, ULONG_PTR bitArraySize)
 {
 
     //
-    // TODO: lock BITARRAY
+    // Note: Bitarray MUST be locked to use this function
     //
 
     ULONG_PTR bitIndex;

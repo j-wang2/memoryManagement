@@ -44,6 +44,9 @@ getFreePage(BOOLEAN returnLocked)
             return NULL;
         }
 
+        // set PF offset to our "null" value in the PFN metadata
+        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
+
         return returnPFN;
 
     } else {
@@ -59,6 +62,11 @@ getStandbyPage(BOOLEAN returnLocked)
 {
 
     PPFNdata returnPFN;
+    PPTE currPTE;
+    PTE oldPTE;
+    PTE newPTE;
+    ULONG_PTR pageNum;
+
 
     if (standbyListHead.count != 0) {
 
@@ -77,26 +85,34 @@ getStandbyPage(BOOLEAN returnLocked)
             return NULL;
         }
 
-        // get PTE
-        PPTE currPTE;
+        //
+        // Derive currPTE pointer (page lock, NOT PTE lock, is held)
+        //
+
         currPTE = PTEarray + returnPFN->PTEindex;
 
-        // create copy of the currPTE to reference
-        PTE oldPTE;
+        //
+        // Create local copy of the currPTE to reference
+        //
+
         oldPTE = *currPTE; 
 
-        ULONG_PTR pageNum;
         pageNum = returnPFN - PFNarray;
 
         ASSERT(oldPTE.u1.tPTE.transitionBit == 1 && oldPTE.u1.tPTE.PFN == pageNum);
 
-        //  create newPTE initialized to zero (blank slate)
-        PTE newPTE;
+        //
+        //  Create newPTE initialized to zero (blank slate)
+        //
+
         newPTE.u1.ulongPTE = 0;
 
-        // if page is not already in pagefile, it MUST be a zero page 
+        //
+        // If standby page is not already in pagefile, it MUST be a zero page 
         // (i.e. faulted into active but never written, then trimmed to standby)
         // Therefore, the PTE can be set to demand zero 
+        //
+
         if (returnPFN->pageFileOffset == INVALID_BITARRAY_INDEX) {
 
             // copy permissions to dz format PTE
@@ -114,15 +130,30 @@ getStandbyPage(BOOLEAN returnLocked)
 
         }
 
-        // copy permissions to pf format PTE
+        //
+        // Copy old permissions to new pf format PTE
+        //
+        
         newPTE.u1.pfPTE.permissions = oldPTE.u1.tPTE.permissions;
 
-        // put PF index into pf format PTE
+        //
+        // Put PF index into pf format PTE
+        //
+
         newPTE.u1.pfPTE.pageFileIndex = returnPFN->pageFileOffset;
 
         returnPFN->statusBits = FREE;
 
-        // copy newPTE back into currPTE
+        //
+        // set PF offset to our "null" value in the PFN metadata
+        //
+
+        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
+
+        //
+        // Write newPTE back into currPTE
+        //
+
         writePTE(currPTE, newPTE);
        
         //
@@ -175,9 +206,6 @@ getPage(BOOLEAN returnLocked)
     returnPFN = getZeroPage(returnLocked);
     if (returnPFN != NULL) {
 
-        // set PF offset to our "null" value in the PFN metadata
-        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
-
         PRINT("[getPage] Allocated PFN from zero list\n");
 
         return returnPFN;
@@ -195,9 +223,6 @@ getPage(BOOLEAN returnLocked)
         // zeroPage (does not update status bits in PFN metadata)
         zeroPage(PFN);
 
-        // set PF offset to our "null" value in the PFN metadata
-        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
-
         PRINT("[getPage] Allocated PFN from free list\n");
 
         return returnPFN;
@@ -212,9 +237,6 @@ getPage(BOOLEAN returnLocked)
 
         // zeroPage (does not update status bits in PFN metadata)
         zeroPage(PFN);
-
-        // set PF offset to our "null" value in the PFN metadata
-        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         PRINT("[getPage] Allocated PFN from standby list\n");
 

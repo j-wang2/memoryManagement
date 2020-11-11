@@ -62,16 +62,12 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
             // clear pagefile pointer out of PFN
             PFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
-        } 
-        
-        // else {
+        }         
+        else {
 
-        //     PFN->dirtyBit = 1;     // TODO
+            PFN->dirtyBit = 1;     // TODO
 
-        // }
-
-        // PFN->dirtyBit = 1;     // TODO
-
+        }
 
         //
         // Otherwise, if the write in progress bit is set, the modified writer is 
@@ -91,6 +87,8 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 
 }
 
+
+volatile int ctrs;
 
 faultStatus
 transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
@@ -220,20 +218,50 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
             transitionPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         } 
-        // else {
+        else {
 
-        //     transitionPFN->dirtyBit = 1;   // TODO
+            ctrs++;
+            transitionPFN->dirtyBit = 1;   // TODO
 
-        // }
+        }
 
 
     } else {
-        
-        // if PFN is modified, maintain dirty bit when switched back
+
+        //  
+        // If write in progress bit is set, it is unclear whether 
+        // pagefile write will succeed or fail. As such, PFN is 
+        // simply marked as remodified so the pagefile space is 
+        // discarded in either case. Erring on side of caution at 
+        // cost of possible efficiency and to avoid extreme complexity
+        // for an uncommon edge case.
+        //
+
+        if (transitionPFN->writeInProgressBit) {
+
+            transitionPFN->remodifiedBit = 1;
+
+        }
+
+        //
+        // Read fault - if PFN is modified,  maintain dirty bit when switched back
+        //
+        // Must also set the dirty bit even if remodified bit is set,
+        // since the remodified bit is checked only in the modified writer
+        // and thus if the dirty bit was not set, a page would be trimmed
+        // to standby and the remodified bit would never be checked.
+        //
+
         if (transitionPFN->statusBits == MODIFIED) {
 
+            //
+            // Transfer dirty bit to PTE, clearing from PFN
+            // (since PTE is checked on trim)
+            //
+
             newPTE.u1.hPTE.dirtyBit = 1;
-            // transitionPFN->dirtyBit = 1;        // todo
+
+            transitionPFN->dirtyBit = 0;
 
         }
         
@@ -317,6 +345,9 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     PPFNdata freedPFN;
     ULONG_PTR PTEindex;
     BOOL bResult;
+    BOOL clearIndex;
+
+    clearIndex = FALSE;
 
     PRINT(" - pf page fault\n");
 
@@ -425,7 +456,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     bResult = FALSE;
 
-    ULONG_PTR signature = (ULONG_PTR) virtualAddress & ~(PAGE_SIZE - 1);
+    ULONG_PTR signature = (ULONG_PTR) virtualAddress & ~(PAGE_SIZE - 1);    // TODO (remove/ifdef)
     
     while (bResult != TRUE) {
 
@@ -440,16 +471,23 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     acquirePTELock(masterPTE);
 
     //
-    // While page is being read in from filesystem, PTE can be decommitted
+    // While page is being read in from filesystem, the only PTE state change that 
+    // can occur is a decommit
     //
 
     if (newPTE.u1.ulongPTE != masterPTE->u1.ulongPTE) {
 
-        ASSERT(freedPFN->statusBits == AWAITING_FREE);
+        //
+        // Verify a decommit has occurred
+        //
 
         ASSERT(masterPTE->u1.ulongPTE == 0 || masterPTE->u1.dzPTE.decommitBit == 1);
 
         acquireJLock(&freedPFN->lockBits);
+
+        ASSERT(freedPFN->statusBits == AWAITING_FREE);
+
+        // todo - do i need to clear pfn dirty bit?
 
         //
         // set readInProgressBit to 0 and set event so other threads that have transition faulted on this PTE can proceed
@@ -488,10 +526,6 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     PTEindex = masterPTE - PTEarray;
 
-    freedPFN->PTEindex = PTEindex;
-
-    freedPFN->statusBits = ACTIVE;
-
     //
     // Zero out local newPTE so it can be changed to active once again
     //
@@ -518,19 +552,21 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
         newPTE.u1.hPTE.dirtyBit = 1;
 
-        // freedPFN->dirtyBit = 1;     // TODO
-
         //
         // free PF location 
         // Note: locking is required, since if two threads clear near-simultaneously, 
         // the PFbit index could be used for another unrelated purpose and then the 
-        // second thread would clear data that is unrelated and unexpected
+        // second thread would clear data that is unrelated and unexpected..
+        // Pagefile lock is acquired and held in the clearPFBitIndex code
         //
 
-        clearPFBitIndex(snapPTE.u1.pfPTE.pageFileIndex);        // check that this makes sense - todo
+        clearPFBitIndex(snapPTE.u1.pfPTE.pageFileIndex);
 
-        // clear pagefile pointer out of PFN
-        freedPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
+        //
+        // Set flag to clear index once PFN lock has been acquired
+        //
+
+        clearIndex = TRUE;
 
     }
 
@@ -564,12 +600,31 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         PRINT_ERROR("[pf PageFault] Kernel state issue: Error virtual protecting VA with permissions %u\n", pageFileRWEpermissions);
     }
 
+    acquireJLock(&freedPFN->lockBits);
+
     //
     // set readInProgressBit to 0 and set event so other threads that have transition faulted on this PTE can proceed
     //
 
     ASSERT(freedPFN->readInProgressBit == 1);
+
     freedPFN->readInProgressBit = 0;
+
+    freedPFN->PTEindex = PTEindex;
+
+    freedPFN->statusBits = ACTIVE;
+
+    //
+    // Now that PFN lock is held, check clearIndex flag in order to 
+    // decide whether pageFileOffset field must be cleared from PFN
+    //
+
+    if (clearIndex == TRUE) {
+
+        freedPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
+
+    }
+
     
     
     SetEvent(readInProgEventNode->event);
@@ -581,6 +636,9 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         enqueueEvent(&readInProgEventListHead, readInProgEventNode);
 
     }
+
+    releaseJLock(&freedPFN->lockBits);
+    
 
     return SUCCESS;
 

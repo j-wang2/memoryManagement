@@ -15,7 +15,8 @@
 /*********** temporary testing macros ************/
 // #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
 #define CHECK_PFNS
-#define PAGEFILE_OFF
+// #define PAGEFILE_OFF
+#define PAGEFILE_PFN_CHECK
 #define TEMP_TESTING                                // temporary workaround for PF due to app verifier
 #define NUM_THREADS 5
 #define TESTING_ZERO                                // toggles zero page thread
@@ -29,7 +30,7 @@
 
 
 /*********** number of physical memory pages to allocate (+ PF pages for total memory) **********/
-// #define NUM_PAGES 6
+// #define NUM_PAGES 64
 #define NUM_PAGES 512
 // #define NUM_PAGES 2048
 // #define NUM_PAGES 64000
@@ -51,7 +52,7 @@
 
 
 /*********** pagefile macros ***************************/
-// #define PAGEFILE_PAGES 17                           // capacity of pagefile pages (+ NUM_PAGES for total memory)
+// #define PAGEFILE_PAGES 8                           // capacity of pagefile pages (+ NUM_PAGES for total memory)
 
 #define PAGEFILE_PAGES 512                          // capacity of pagefile pages (+ NUM_PAGES for total memory)
 #define PAGEFILE_SIZE PAGEFILE_PAGES*PAGE_SIZE      // total pagefile size 
@@ -79,6 +80,7 @@ typedef struct _hardwarePTE{
     ULONG64 executeBit: 1;
     ULONG64 dirtyBit: 1;
     ULONG64 agingBit: 1;
+    ULONG64 padding: 3;             // To maintain 4-bit alignment (for debugging ease at space efficiency cost)
     ULONG64 PFN: PFN_BITS;          //  page frame number (PHYSICAL)
 } hardwarePTE, *PhardwarePTE;
 
@@ -86,6 +88,7 @@ typedef struct _transitionPTE{
     ULONG64 validBit: 1;            // valid bit MUST be 0 for tPTE
     ULONG64 transitionBit: 1;       // transition bit MUST be set for tPTE
     ULONG64 permissions: PERMISSIONS_BITS;
+    ULONG64 padding: 3;             // To maintain 4-bit alignment (for debugging ease at space efficiency cost)
     ULONG64 PFN: PFN_BITS;
 } transitionPTE, *PtransitionPTE;
 
@@ -94,6 +97,7 @@ typedef struct _pageFilePTE{
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for pfPTE
     ULONG64 decommitBit: 1;
     ULONG64 permissions: PERMISSIONS_BITS;
+    ULONG64 padding: 2;             // To maintain 4-bit alignment (for debugging ease at space efficiency cost)
     ULONG64 pageFileIndex: PAGEFILE_BITS;
 } pageFilePTE, *PpageFilePTE;
 
@@ -102,6 +106,7 @@ typedef struct _demandZeroPTE{
     ULONG64 transitionBit: 1;       // transition bit MUST be 0 for dzPTE
     ULONG64 decommitBit: 1;
     ULONG64 permissions: PERMISSIONS_BITS;
+    ULONG64 padding: 2;                     // To maintain 4-bit alignment (for debugging ease at space efficiency cost)
     ULONG64 pageFileIndex: PAGEFILE_BITS;   // PF index MUST be INVALID_BITARRAY_INDEX( MAXULONG_PTR) for dzPTE
 } demandZeroPTE, *PdemandZeroPTE;
 
@@ -132,7 +137,7 @@ typedef struct _PFNdata {
     ULONG64 readInProgressBit: 1;
     ULONG64 refCount: 16;                
     ULONG64 remodifiedBit: 1;        
-    ULONG64 dirtyBit: 1;                // TODO 
+    ULONG64 dirtyBit: 1;
     volatile LONG lockBits;                // 31 free bits if necessary
     PeventNode readInProgEventNode;
     HANDLE readInProgEvent;
@@ -205,7 +210,18 @@ extern ULONG_PTR totalMemoryPageLimit;     // limit of committed pages (memory b
 
 
 extern void* pageFileVABlock;              // starting address of pagefile "disk" (memory)
+
+#ifdef PAGEFILE_PFN_CHECK
+typedef struct _pageFileDebug {
+    PPTE currPTE;
+    PPFNdata currPFN;
+    PTE PTEdata;
+    PFNdata PFNdata;
+} pageFileDebug, *PPageFileDebug;
+extern PPageFileDebug pageFileDebugArray;
+#else
 extern ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
+#endif
 
 // Execute-Write-Read (bit ordering)
 extern ULONG_PTR permissionMasks[];
