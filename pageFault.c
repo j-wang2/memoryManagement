@@ -67,7 +67,14 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
         }         
         else {
 
-            PFN->remodifiedBit = 1;     // TODO
+            //
+            // If PFN write in progress bit is set on write fault,
+            // set remodified bit in PFN to signal modified page writer
+            // to clear PF space and PF offset field in PFN upon 
+            // write completion (since contents are now stale)
+            //
+
+            PFN->remodifiedBit = 1; 
 
         }
 
@@ -190,7 +197,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         // If refcount is non-zero, the event can no longer be edited
         //
 
-        acquireJLock(&transitionPFN->lockBits); // TODO
+        acquireJLock(&transitionPFN->lockBits);
 
         //
         // Assert PFN has not changed since release/re-acquisition of page lock,
@@ -234,15 +241,19 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         newPTE.u1.hPTE.dirtyBit = 1;
 
         //
-        // If the write in progress bit is clear, immediately free pf location 
-        // and pf PFN pointer
-        // if the write in progress bit is set, the bit index and pagefile field
-        // are cleared by the modified page writer once it finishes writing
+        // If the write in progress bit is clear and PFN status bits are standby,
+        // immediately free pagefile location and pagefile offset field from PFN.
+        // In the case of a modified page, since the PFN lock is held, no pagefile
+        // space corresponds with the provided PFN
         //
 
         if (transitionPFN->writeInProgressBit == 0 && transitionPFN->statusBits == STANDBY) {       // todo-  verify second half of this statement
 
-            // clear PF bit index
+            //
+            // Clear pagefile space (reliant on PFN pagefile offset field 
+            // accuracy)
+            //
+
             clearPFBitIndex(transitionPFN->pageFileOffset);
 
             // clear pagefile pointer out of PFN
@@ -250,39 +261,21 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
         } 
         else {
+ 
+            //
+            // If PFN write in progress bit is set on write fault,
+            // set remodified bit in PFN to signal modified page writer
+            // to clear PF space and PF offset field in PFN upon 
+            // write completion (since contents are now stale)
+            //
 
-            transitionPFN->remodifiedBit = 1;   // TODO
+            transitionPFN->remodifiedBit = 1;
 
         }
 
 
     } 
     
-    // else {
-
-    //     //
-    //     // Read fault - if PFN is modified,  maintain dirty bit when switched back
-    //     //
-    //     // Must also set the PFN remodified bit, since the remodified bit 
-    //     // is checked in the modified writer and in the trimmer
-    //     //
-
-    //     if (transitionPFN->statusBits == MODIFIED) {
-
-    //         //
-    //         // Transfer dirty bit to PTE, clearing remodified
-    //         // bit if set from PFN
-    //         // (since PTE is checked on trim)
-    //         //
-
-    //         newPTE.u1.hPTE.dirtyBit = 1;
-
-    //         transitionPFN->remodifiedBit = 0;
-
-    //     }
-        
-    // }
-
     //
     // Page is only dequeued from standby/modified if write in progress bit is zero
     //
@@ -524,7 +517,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
         freedPFN->refCount--;
 
-        if (freedPFN->refCount == 0) {   // todo - change to non interlocked decrement and add refcount PFN
+        if (freedPFN->refCount == 0) {
 
             freedPFN->readInProgEventNode = NULL;
 
@@ -658,12 +651,11 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     freedPFN->refCount--;
 
-    if (freedPFN->refCount == 0) {   // todo - change to non interlocked decrement and add refcount PFN
+    if (freedPFN->refCount == 0) {
 
         freedPFN->readInProgEventNode = NULL;
 
         enqueueEvent(&readInProgEventListHead, readInProgEventNode);
-
 
     }
 

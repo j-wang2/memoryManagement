@@ -97,7 +97,7 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
 
     ASSERT(PFN->remodifiedBit == 0);
 
-    ASSERT(PFN->refCount == 0 && PFN->readInProgEventNode == NULL);   // todo check
+    // ASSERT(PFN->refCount == 0 && PFN->readInProgEventNode == NULL);   // todo check
 
     listStatus = listHead - listHeads;
 
@@ -161,8 +161,9 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
     if (listStatus == MODIFIED) {
 
         if (listHead->count > 10) {     // TODO - don't hardcode limit
-            // PRINT_ALWAYS("status = modified\n");
+
             wakeModifiedWriter = TRUE;
+            
         }
         
     }
@@ -208,8 +209,9 @@ enqueuePageBasic(PlistData listHead, PPFNdata PFN) {
     if (listStatus == MODIFIED) {
 
         if (listHead->count > 10) {     // TODO - don't hardcode limit
-            // PRINT_ALWAYS("status = modified\n");
+
             wakeModifiedWriter = TRUE;
+
         }
         
     }

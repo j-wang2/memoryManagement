@@ -407,19 +407,26 @@ zeroPage(ULONG_PTR PFN)
 BOOLEAN
 zeroPageWriter()
 {
+    //
+    // Acquires & releases both list and page locks
+    //
 
-
-    // acquires & releases both list and page locks
     PPFNdata PFNtoZero;
     PFNtoZero = dequeueLockedPage(&freeListHead, TRUE);
 
 
     if (PFNtoZero == NULL) {
+
         PRINT("free list empty - could not write out\n");
         return FALSE;
+
     }
 
-    // set overloaded "writeinprogress" bit (to signify page is currently being zeroed)
+    //
+    // Set overloaded "writeinprogress" bit (to signify page is currently being zeroed)
+    // Note: write in progress is also set by modified page writer, but in a different context (todo check)
+    //
+
     PFNtoZero->writeInProgressBit = 1;
 
     releaseJLock(&PFNtoZero->lockBits);
@@ -450,7 +457,7 @@ zeroPageWriter()
 
 
         #ifdef PAGEFILE_PFN_CHECK
-        enqueuePageBasic(&freeListHead, PFNtoZero);
+        enqueuePageBasic(&zeroListHead, PFNtoZero);
         #else
         // enqueue to zeroList (updates status bits in PFN metadata)
         enqueuePage(&zeroListHead, PFNtoZero);
@@ -463,6 +470,7 @@ zeroPageWriter()
     PRINT(" - Moved page from free -> zero \n");
 
     return TRUE;
+
 }
 
 
@@ -472,6 +480,7 @@ zeroPageThread(HANDLE terminationHandle)
 
     int numZeroed = 0;
     int numWaited = 0;
+
     // create local handle array
     HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
@@ -479,8 +488,17 @@ zeroPageThread(HANDLE terminationHandle)
 
     // zero pages until none left to zero
     while (TRUE) {
+
         BOOLEAN bres;
+
+        //
+        // zeroPageWriter returns false on empty zero page list. 
+        // Thus, in the case it returns false, it will wait for either
+        // a new page event or termination handle.
+        //
+
         bres = zeroPageWriter();
+
         if (bres == FALSE) {
 
             DWORD retVal = WaitForMultipleObjects(2, handleArray, FALSE, INFINITE);
@@ -569,15 +587,28 @@ freePageTestThread(HANDLE terminationHandle)
 VOID
 releaseAwaitingFreePFN(PPFNdata PFNtoFree)
 {
+
+    //
+    // Verify page lock is held
+    //
+
     ASSERT(PFNtoFree->lockBits == 1);
         
+    //
+    // Clear index in pagefile, pagefile offset field in PFN,
+    // and remodified bit in PFN.
+    //
+
     clearPFBitIndex(PFNtoFree->pageFileOffset);
 
     PFNtoFree->pageFileOffset = INVALID_BITARRAY_INDEX;
 
-    PFNtoFree->remodifiedBit = 0;       // TODO - CHECK
+    PFNtoFree->remodifiedBit = 0;
 
-    // enqueue Page to free list
+    //
+    // Enqueue Page to free list
+    //
+
     enqueuePage(&freeListHead, PFNtoFree);
 
     PRINT("[releaseAwaitingFreePFN] VA decommitted during PF write\n");
@@ -613,8 +644,11 @@ modifiedPageWriter()
     }
 
     //
-    // Lock has previuosly been acquired - set write in progress bit to 1
+    // Lock has previuosly been acquired - assert that PFN has no associated pagefile
+    // offset ad that write in progress bit is zero. Then set write in progress bit to 1
     //
+
+    ASSERT(PFNtoWrite->pageFileOffset == INVALID_BITARRAY_INDEX);
 
     ASSERT(PFNtoWrite->writeInProgressBit == 0);
 
@@ -625,10 +659,13 @@ modifiedPageWriter()
     //
 
     PFNtoWrite->statusBits = MODIFIED;
-
-    ASSERT(PFNtoWrite->pageFileOffset == INVALID_BITARRAY_INDEX);
     
-    PFNtoWrite->remodifiedBit = 0;      // TODO
+    //
+    // Clear PFN's remodified bit (since it will be written/attempted to be written
+    // to pagefile), and can now be re-set once page lock is released
+    //
+
+    PFNtoWrite->remodifiedBit = 0;
 
     //
     // Release PFN lock: write in progress bit has been set, status bits have
@@ -1249,12 +1286,10 @@ trimValidPTEThread(HANDLE terminationHandle)
         } 
 
         ULONG_PTR currNum;
-        currNum = trimValidPTEs();      // TODO (potential issue with wait)
-        // currNum += trimValidPTEs();
-        // currNum += trimValidPTEs();
-        // currNum += trimValidPTEs();
+        currNum = trimValidPTEs();
 
         numTrimmed += currNum;
+
     }
 
     return 0;
