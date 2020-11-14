@@ -4,6 +4,7 @@
 *.obj
 *.ilk
 *.pdb
+*.log
 legacy-programs/
 todo.txt
 vadNodes.c

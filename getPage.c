@@ -118,7 +118,7 @@ getStandbyPage(BOOLEAN returnLocked)
             // copy permissions to dz format PTE
             newPTE.u1.dzPTE.permissions = oldPTE.u1.tPTE.permissions;
 
-            // put PF index into dz format PTE
+            // put an invalid index into dz format PTE
             newPTE.u1.dzPTE.pageFileIndex = INVALID_BITARRAY_INDEX;
 
             returnPFN->statusBits = FREE;

@@ -2,6 +2,7 @@
 #include "enqueue-dequeue.h"
 // #include "pagefile.h"
 #include "jLock.h"
+#include "PTEpermissions.h"
 
 #ifndef PAGEFILE_PFN_CHECK
 ULONG_PTR
@@ -84,17 +85,23 @@ setPFDebugIndex(PPFNdata currPFN)
 
     currEntry.currPTE = currPTE;
     currEntry.PTEdata = *currPTE;
+    
+    EnterCriticalSection(&pageFileLock);
 
     for (ULONG_PTR j = 0; j < PAGEFILE_PAGES; j++) {
 
         checkEntry = pageFileDebugArray + j;
         ULONG_PTR checkPTEindex = checkEntry->currPTE - PTEarray;
 
+        //
+        // Verify PTE corresponding to the PFN being written to pagefile 
+        // does not already occupy a pagefile space.
+        //
+
         ASSERT(PTEindex != checkPTEindex);
 
     }
 
-    EnterCriticalSection(&pageFileLock);
 
     for (ULONG_PTR i = 0; i < PAGEFILE_PAGES; i++) {
 
@@ -126,6 +133,7 @@ clearPFBitIndex(ULONG_PTR pfVA)
     // if pagefile address is invalid, return
     if (pfVA == INVALID_BITARRAY_INDEX) {
 
+        // ASSERT(FALSE);
         return;
 
     }
@@ -137,6 +145,15 @@ clearPFBitIndex(ULONG_PTR pfVA)
         EnterCriticalSection(&pageFileLock);
 
         ASSERT(memcmp(&pageFileDebugArray[pfVA], &temp, sizeof(temp)) != 0 );
+
+        pageFileDebug currEntry;
+
+        currEntry = pageFileDebugArray[pfVA];
+
+        PTE logPTE;
+        logPTE.u1.ulongPTE = MAXULONG_PTR;
+
+        logEntry( currEntry.currPTE, *currEntry.currPTE, logPTE, &currEntry.PFNdata);
 
         memset(&pageFileDebugArray[pfVA], 0, sizeof(pageFileDebug) );
 
@@ -176,6 +193,9 @@ clearPFBitIndex(ULONG_PTR pfVA)
     LeaveCriticalSection(&pageFileLock);
 
     #endif
+
+    ASSERT(FALSE);
+    
 }
 
 

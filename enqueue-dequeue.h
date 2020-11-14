@@ -38,6 +38,9 @@ enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem);
 BOOLEAN
 enqueuePage(PlistData listHead, PPFNdata PFN);
 
+BOOLEAN
+enqueuePageBasic(PlistData listHead, PPFNdata PFN);
+
 /*
  * dequeuePage: function to dequeue an item from the head of a specified list
  *  - Caller must pre-acquire locks

@@ -8,7 +8,7 @@
 
 #define LOG_ARRAY_SIZE 0x4000
 
-typedef struct _PTETrace{
+typedef struct _PTETrace {
 
     PPTE dest;
     PTE oldPTE;
@@ -17,7 +17,7 @@ typedef struct _PTETrace{
     ULONG64 padding;
     PFNdata PFN;
 
-    PVOID stackTrace[2];
+    PVOID stackTrace[4];
 
 
 } PTETrace, *PPTETrace;
@@ -29,6 +29,43 @@ LONG currLogIndex;
 #endif
 
 VOID
+logEntry(PPTE dest, PTE oldValue, PTE newValue, PPFNdata currPage)
+{
+    LONG index;
+    PPTETrace currTrace;
+
+
+    index = InterlockedIncrementAcquire(&currLogIndex);
+    index &= (LOG_ARRAY_SIZE - 1);
+    currTrace = &PTEHistoryLog[index];
+
+    currTrace->dest = dest;
+    currTrace->newPTE = newValue;
+    currTrace->oldPTE = oldValue;
+
+    memset(&currTrace->stackTrace, 0, sizeof(currTrace->stackTrace));
+
+    if (currPage != NULL) {
+        memcpy(&currTrace->PFN, currPage, sizeof(PFNdata));
+
+    } else {
+        memset(&currTrace->PFN, 0, sizeof(PFNdata));
+
+    }
+
+    DWORD hash;
+    hash = 0;
+
+    if (RtlCaptureStackBackTrace (0, ARRAYSIZE(currTrace->stackTrace), currTrace->stackTrace, &hash ) == 0) {
+        currTrace->stackTrace[0] = (PVOID) _ReturnAddress();
+
+    }
+
+
+
+}
+
+VOID
 writePTE(PPTE dest, PTE value)
 {
     
@@ -36,20 +73,23 @@ writePTE(PPTE dest, PTE value)
 
     PPFNdata currPage;
 
+    ULONG_PTR PTEindex;
+
+    PTEindex = dest - PTEarray;
+
     if (value.u1.hPTE.validBit == 1) {
-
-        ULONG_PTR PTEindex;
-
-        PTEindex = dest - PTEarray;
 
         currPage = PFNarray + value.u1.hPTE.PFN;
 
-        ASSERT(currPage->PTEindex == PTEindex);
+        ASSERT(currPage->statusBits != AWAITING_FREE);
 
     }
     else if (value.u1.tPTE.transitionBit == 1) {
 
         currPage = PFNarray + value.u1.tPTE.PFN;
+
+        ASSERT(currPage->statusBits != AWAITING_FREE);
+
 
     }
     else if (dest->u1.hPTE.validBit == 1) {
@@ -65,32 +105,12 @@ writePTE(PPTE dest, PTE value)
     else {
         currPage = NULL;
     }
-    
+
+    ASSERT(currPage == NULL || currPage->PTEindex == PTEindex);
 
 
-    LONG index;
-    PPTETrace currTrace;
+    logEntry(dest, *dest, value, currPage);
 
-
-    index = InterlockedIncrementAcquire(&currLogIndex);
-    index &= (LOG_ARRAY_SIZE - 1);
-    currTrace = &PTEHistoryLog[index];
-
-    currTrace->dest = dest;
-    currTrace->newPTE = value;
-    currTrace->oldPTE = *dest;
-
-    memset(&currTrace->stackTrace, 0, sizeof(currTrace->stackTrace));
-
-    if (currPage != NULL) {
-        memcpy(&currTrace->PFN, currPage, sizeof(PFNdata));
-
-    } else {
-        memset(&currTrace->PFN, 0, sizeof(PFNdata));
-
-    }
-
-    currTrace->stackTrace[0] = (PVOID) _ReturnAddress();
 
     #endif
 

@@ -95,7 +95,9 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
 
     ASSERT(PFN->lockBits != 0);
 
-    ASSERT(PFN->dirtyBit == 0);
+    ASSERT(PFN->remodifiedBit == 0);
+
+    ASSERT(PFN->refCount == 0 && PFN->readInProgEventNode == NULL);   // todo check
 
     listStatus = listHead - listHeads;
 
@@ -174,6 +176,53 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
     return wakeModifiedWriter;
 
 }
+
+#ifdef PAGEFILE_PFN_CHECK
+BOOLEAN
+enqueuePageBasic(PlistData listHead, PPFNdata PFN) {
+
+    BOOLEAN wakeModifiedWriter;
+    PFNstatus listStatus;
+
+    wakeModifiedWriter = FALSE;
+
+    ASSERT(PFN->lockBits != 0);
+
+    ASSERT(PFN->remodifiedBit == 0);
+
+    listStatus = listHead - listHeads;
+
+    //lock listHead (since listHead values are not changed/accessed until dereferenced)
+    EnterCriticalSection(&(listHead->lock));
+
+    // enqueue onto list
+    enqueue( &(listHead->head), &(PFN->links) );
+
+    // update pagecount of that list
+    listHead->count++;
+
+    #ifdef MULTITHREADING
+    SetEvent(listHead->newPagesEvent);
+    #endif
+
+    if (listStatus == MODIFIED) {
+
+        if (listHead->count > 10) {     // TODO - don't hardcode limit
+            // PRINT_ALWAYS("status = modified\n");
+            wakeModifiedWriter = TRUE;
+        }
+        
+    }
+
+    // unlock listHead
+    LeaveCriticalSection(&(listHead->lock));
+
+    // set statusBits to the list we've just enqueued the page on
+    PFN->statusBits = listStatus;
+
+    return wakeModifiedWriter;
+}
+#endif
 
 
 PPFNdata

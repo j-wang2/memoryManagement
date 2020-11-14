@@ -36,7 +36,9 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
     snapPTE.u1.hPTE.agingBit = 0;
 
     //
-    // Check for Write permissions - if write, set dirty bit and clear PF
+    // Check for Write permissions - if write, clear pagefile space 
+    // OR, if write in progress, set remodified bit to signal modified
+    // writer to clear space upon completion
     //
 
     if (permissionMasks[RWEpermissions] & writeMask) {
@@ -65,7 +67,7 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
         }         
         else {
 
-            PFN->dirtyBit = 1;     // TODO
+            PFN->remodifiedBit = 1;     // TODO
 
         }
 
@@ -148,6 +150,12 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     }
 
     //
+    // Verify PFN has not changed state (should not occur, since both PTE and page lock are held)
+    //
+
+    ASSERT(transitionPFN->statusBits == STANDBY || transitionPFN->statusBits == MODIFIED);
+
+    //
     // If readInProgress bit is set, wait for event to signal completion and retry fault
     //
 
@@ -155,12 +163,17 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
         HANDLE currEvent;
         PeventNode currEventNode;
+        ULONG_PTR currPTEIndex;
+
+        currPTEIndex = transitionPFN->PTEindex;
 
         currEventNode = transitionPFN->readInProgEventNode;
 
         currEvent = currEventNode->event;
 
-        InterlockedIncrement(&currEventNode->refCount);
+        ASSERT(currEventNode != NULL && currEvent != NULL);
+
+        transitionPFN->refCount++;
 
         releaseJLock(&transitionPFN->lockBits);
 
@@ -177,13 +190,30 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         // If refcount is non-zero, the event can no longer be edited
         //
 
-        if (InterlockedDecrement(&currEventNode->refCount) == 0){
+        acquireJLock(&transitionPFN->lockBits); // TODO
+
+        //
+        // Assert PFN has not changed since release/re-acquisition of page lock,
+        // since refcount is bumped
+        // todo assert that PFN has nto changed ( by checking ripevent node & PTEindex)
+        //
+
+        ASSERT(currEventNode == transitionPFN->readInProgEventNode);
+
+        ASSERT(currPTEIndex == transitionPFN->PTEindex);
+
+        transitionPFN->refCount--;
+
+        if (transitionPFN->refCount == 0){   // todo - change to non interlocked decrement and add refcount PFN
+                    // needs to be fixed so that any enqueue to list checks this so there isnt a repurpose without ccheckig read in rpog bit
             
             transitionPFN->readInProgEventNode = NULL;
 
             enqueueEvent(&readInProgEventListHead, currEventNode);
 
         }
+
+        releaseJLock(&transitionPFN->lockBits);
 
         acquirePTELock(masterPTE);
 
@@ -192,27 +222,28 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     }
 
     //
-    // Verify PFN has not changed state (should not occur, since both PTE and page lock are held)
-    //
-
-    ASSERT(transitionPFN->statusBits == STANDBY || transitionPFN->statusBits == MODIFIED);
-
-    //
     // If requested permissions are write, set dirty bit & clear PF location (if it exists)
     //
     
     if (permissionMasks[RWEpermissions] & writeMask) { 
 
+        //
+        // Set PTE dirty bit - the requested permission are write
+        //
 
-        // if the write in progress bit is clear, immediately free pf location 
+        newPTE.u1.hPTE.dirtyBit = 1;
+
+        //
+        // If the write in progress bit is clear, immediately free pf location 
         // and pf PFN pointer
         // if the write in progress bit is set, the bit index and pagefile field
-        // are cleared by the smodified page writer once it finishes writing
-        if (transitionPFN->writeInProgressBit == 0) {
+        // are cleared by the modified page writer once it finishes writing
+        //
+
+        if (transitionPFN->writeInProgressBit == 0 && transitionPFN->statusBits == STANDBY) {       // todo-  verify second half of this statement
 
             // clear PF bit index
             clearPFBitIndex(transitionPFN->pageFileOffset);
-
 
             // clear pagefile pointer out of PFN
             transitionPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
@@ -220,52 +251,37 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         } 
         else {
 
-            ctrs++;
-            transitionPFN->dirtyBit = 1;   // TODO
+            transitionPFN->remodifiedBit = 1;   // TODO
 
         }
 
 
-    } else {
+    } 
+    
+    // else {
 
-        //  
-        // If write in progress bit is set, it is unclear whether 
-        // pagefile write will succeed or fail. As such, PFN is 
-        // simply marked as remodified so the pagefile space is 
-        // discarded in either case. Erring on side of caution at 
-        // cost of possible efficiency and to avoid extreme complexity
-        // for an uncommon edge case.
-        //
+    //     //
+    //     // Read fault - if PFN is modified,  maintain dirty bit when switched back
+    //     //
+    //     // Must also set the PFN remodified bit, since the remodified bit 
+    //     // is checked in the modified writer and in the trimmer
+    //     //
 
-        if (transitionPFN->writeInProgressBit) {
+    //     if (transitionPFN->statusBits == MODIFIED) {
 
-            transitionPFN->remodifiedBit = 1;
+    //         //
+    //         // Transfer dirty bit to PTE, clearing remodified
+    //         // bit if set from PFN
+    //         // (since PTE is checked on trim)
+    //         //
 
-        }
+    //         newPTE.u1.hPTE.dirtyBit = 1;
 
-        //
-        // Read fault - if PFN is modified,  maintain dirty bit when switched back
-        //
-        // Must also set the dirty bit even if remodified bit is set,
-        // since the remodified bit is checked only in the modified writer
-        // and thus if the dirty bit was not set, a page would be trimmed
-        // to standby and the remodified bit would never be checked.
-        //
+    //         transitionPFN->remodifiedBit = 0;
 
-        if (transitionPFN->statusBits == MODIFIED) {
-
-            //
-            // Transfer dirty bit to PTE, clearing from PFN
-            // (since PTE is checked on trim)
-            //
-
-            newPTE.u1.hPTE.dirtyBit = 1;
-
-            transitionPFN->dirtyBit = 0;
-
-        }
+    //     }
         
-    }
+    // }
 
     //
     // Page is only dequeued from standby/modified if write in progress bit is zero
@@ -417,10 +433,17 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     freedPFN->PTEindex = masterPTE - PTEarray;
 
     //
+    // Assign PFN pagefile offset field to PTE pagefile index
+    // so that upon possible failure it can be freed
+    //
+
+    freedPFN->pageFileOffset = snapPTE.u1.pfPTE.pageFileIndex;
+
+    //
     // Does not need to be an atomic operation since event node cannot yet be referenced via PTE
     //
 
-    readInProgEventNode->refCount = 1;
+    freedPFN->refCount = 1;
 
     //
     // RELEASE pfn lock so that it can now be viewed/modified by other aforementioned threads
@@ -499,9 +522,11 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         
         SetEvent(readInProgEventNode->event);
 
-        if (InterlockedDecrement(&readInProgEventNode->refCount) == 0) {
+        freedPFN->refCount--;
 
-            freedPFN->readInProgEvent = NULL;
+        if (freedPFN->refCount == 0) {   // todo - change to non interlocked decrement and add refcount PFN
+
+            freedPFN->readInProgEventNode = NULL;
 
             enqueueEvent(&readInProgEventListHead, readInProgEventNode);
 
@@ -614,6 +639,8 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     freedPFN->statusBits = ACTIVE;
 
+    ASSERT(freedPFN->pageFileOffset == snapPTE.u1.pfPTE.pageFileIndex);
+
     //
     // Now that PFN lock is held, check clearIndex flag in order to 
     // decide whether pageFileOffset field must be cleared from PFN
@@ -629,11 +656,14 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     
     SetEvent(readInProgEventNode->event);
 
-    if (InterlockedDecrement(&readInProgEventNode->refCount) == 0) {
+    freedPFN->refCount--;
 
-        freedPFN->readInProgEvent = NULL;
+    if (freedPFN->refCount == 0) {   // todo - change to non interlocked decrement and add refcount PFN
+
+        freedPFN->readInProgEventNode = NULL;
 
         enqueueEvent(&readInProgEventListHead, readInProgEventNode);
+
 
     }
 

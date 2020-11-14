@@ -3,6 +3,11 @@
 
 // #include "userMode-AWE-pageFile.h"
 
+
+VOID
+logEntry(PPTE dest, PTE oldValue, PTE newValue, PPFNdata currPage);
+
+
 VOID
 writePTE(PPTE dest, PTE value);
 

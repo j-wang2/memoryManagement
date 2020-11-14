@@ -125,7 +125,6 @@ typedef struct _PTE{
 typedef struct _eventNode {
     LIST_ENTRY links;
     HANDLE event;
-    volatile LONG refCount;
 } eventNode, *PeventNode;
 
 typedef struct _PFNdata {
@@ -140,7 +139,6 @@ typedef struct _PFNdata {
     ULONG64 dirtyBit: 1;
     volatile LONG lockBits;                // 31 free bits if necessary
     PeventNode readInProgEventNode;
-    HANDLE readInProgEvent;
 } PFNdata, *PPFNdata;
 
 typedef struct _listData {

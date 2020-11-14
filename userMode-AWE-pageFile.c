@@ -232,6 +232,8 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
 
         newPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
+        newPFN->refCount = 0;
+
         //
         // add page to free list
         //
@@ -276,10 +278,10 @@ initPageFile(ULONG_PTR diskSize)
 
     #ifndef PAGEFILE_OFF
 
-    for (int i = 0; i < 5; i++) {
-        InterlockedIncrement64(&totalCommittedPages); // (currently used as a "working " page)
+    // for (int i = 0; i < 5; i++) {
+    //     InterlockedIncrement64(&totalCommittedPages); // (currently used as a "working " page)
 
-    }
+    // }
     InterlockedIncrement64(&totalCommittedPages); // (currently used as a "working " page)
 
     #else
@@ -446,8 +448,13 @@ zeroPageWriter()
 
     } else {
 
+
+        #ifdef PAGEFILE_PFN_CHECK
+        enqueuePageBasic(&freeListHead, PFNtoZero);
+        #else
         // enqueue to zeroList (updates status bits in PFN metadata)
         enqueuePage(&zeroListHead, PFNtoZero);
+        #endif
 
     }
 
@@ -510,8 +517,12 @@ freePageTestWriter()
 
     acquireJLock(&PFNtoFree->lockBits);
 
+    #ifdef PAGEFILE_PFN_CHECK
+    enqueuePageBasic(&freeListHead, PFNtoFree);
+    #else
     // enqueue to freeList (updates status bits in PFN metadata)
     enqueuePage(&freeListHead, PFNtoFree);
+    #endif
 
     releaseJLock(&PFNtoFree->lockBits);
 
@@ -558,10 +569,13 @@ freePageTestThread(HANDLE terminationHandle)
 VOID
 releaseAwaitingFreePFN(PPFNdata PFNtoFree)
 {
+    ASSERT(PFNtoFree->lockBits == 1);
         
     clearPFBitIndex(PFNtoFree->pageFileOffset);
 
     PFNtoFree->pageFileOffset = INVALID_BITARRAY_INDEX;
+
+    PFNtoFree->remodifiedBit = 0;       // TODO - CHECK
 
     // enqueue Page to free list
     enqueuePage(&freeListHead, PFNtoFree);
@@ -614,7 +628,7 @@ modifiedPageWriter()
 
     ASSERT(PFNtoWrite->pageFileOffset == INVALID_BITARRAY_INDEX);
     
-    PFNtoWrite->dirtyBit = 0;      // TODO
+    PFNtoWrite->remodifiedBit = 0;      // TODO
 
     //
     // Release PFN lock: write in progress bit has been set, status bits have
@@ -654,6 +668,13 @@ modifiedPageWriter()
 
     PFNtoWrite->writeInProgressBit = 0;
 
+    PTE logPTE;
+    logPTE.u1.ulongPTE = bResult;
+
+    PTE zeroPTE;
+    zeroPTE.u1.ulongPTE = 0;
+
+    logEntry( PTEarray + PFNtoWrite->PTEindex, logPTE, zeroPTE, PFNtoWrite);
 
     // check if PFN has been decommitted
     if (PFNtoWrite->statusBits == AWAITING_FREE) {
@@ -665,7 +686,7 @@ modifiedPageWriter()
         return TRUE;
 
     }
-
+    
     //
     // If filesystem write fails
     //
@@ -690,13 +711,13 @@ modifiedPageWriter()
 
         if (PFNtoWrite->statusBits != ACTIVE) {
 
-            PFNtoWrite->dirtyBit = 0;
+            PFNtoWrite->remodifiedBit = 0;
 
             wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoWrite);
 
         } else {
             
-            PFNtoWrite->dirtyBit = 1;
+            PFNtoWrite->remodifiedBit = 1;
 
         }
 
@@ -737,12 +758,6 @@ modifiedPageWriter()
         // (since page has been re-modified, i.e. write->write fault->trim)
         if (PFNtoWrite->statusBits != ACTIVE) {
 
-            //
-            // Clear PFN dirty bit if set, since PFN is reaching modified list
-            //
-
-            PFNtoWrite->dirtyBit = 0;
-
             wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoWrite);
 
         }
@@ -782,7 +797,7 @@ modifiedPageWriter()
     // if it has been write faulted in, check the dirty bit
     //  - if it is set, clear the PF bit index
     //  - otherwise, continue
-    if (PFNtoWrite->statusBits != ACTIVE && PFNtoWrite->dirtyBit == 0) {
+    if (PFNtoWrite->statusBits != ACTIVE && PFNtoWrite->remodifiedBit == 0) {
 
         ASSERT(currPTE->u1.hPTE.validBit != 1 && currPTE->u1.tPTE.transitionBit == 1);
 
@@ -792,49 +807,7 @@ modifiedPageWriter()
         PRINT(" - Moved page from modified -> standby (wrote out to PageFile successfully)\n");
 
 
-    } 
-    else {
-
-        ctrs[0]++;
-
-        ASSERT(currPTE->u1.hPTE.validBit == 1);             // TODO - note this has caused error
-                                                            // Syncrhonization issue: cannot read PTE without a lock
-                                                            // possible solution: include a modified bit in PFN that is cleared when
-                                                            // filesystemwrite begins, set when another thread tries to clear space
-                                                            // but can't do to write in progress, and replace line 689
-                                                            // with a check of that bit instead
-        if (PFNtoWrite->dirtyBit == 1) {        // TODO
-
-            ctrs[1]++;
-
-            // free PF location from PFN
-            clearPFBitIndex(PFNtoWrite->pageFileOffset);
-
-            // clear pagefile pointer out of PFN
-            PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
-
-            PFNtoWrite->dirtyBit = 0;
-
-            PRINT(" - Page has since been write faulted (discarding PF space)\n");
-
-        }
-
-
-        // if (currPTE->u1.hPTE.dirtyBit == 1) {
-
-        //     // free PF location from PFN
-        //     clearPFBitIndex(PFNtoWrite->pageFileOffset);
-
-        //     // clear pagefile pointer out of PFN
-        //     PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
-            
-        //     PRINT(" - Page has since been write faulted (discarding PF space)\n");
-
-        //     ctrs[1]++;
-
-        // }
     }
-
 
     releaseJLock(&PFNtoWrite->lockBits);
 
@@ -1324,6 +1297,8 @@ checkPageStatusThread(HANDLE terminationHandle)
 
             PRINT_ALWAYS("numpages: %llu\n", numPages);
 
+
+            #ifdef PAGEFILE_PFN_CHECK
             PPageFileDebug currPF;
 
             EnterCriticalSection(&pageFileLock);
@@ -1355,6 +1330,7 @@ checkPageStatusThread(HANDLE terminationHandle)
 
             LeaveCriticalSection(&pageFileLock);
 
+            #endif
 
 
         }

@@ -340,14 +340,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
             
         }
  
-        if (lockHeld == FALSE) {
-
-            LeaveCriticalSection(&VADListHead.lock);
-
-            PRINT_ERROR("[commitVA] unable to acquire lock - fatal error\n");
-            return FALSE;
-
-        }
+        ASSERT(lockHeld == TRUE);
         
         // make a shallow copy/"snapshot" of the PTE to edit and check
         PTE tempPTE;
@@ -396,7 +389,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
                     
                     releaseJLock(&transPFN->lockBits);
 
-                    PRINT("[decommitVA] currPFN has changed from transition state\n");
+                    PRINT("[commitVA] currPFN has changed from transition state\n");
 
                     //
                     // Reprocess same PTE since it has since been changed
@@ -508,8 +501,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         // Write out newPTE contents indivisibly
         //
 
-        writePTE(currPTE, tempPTE);
-        
+        writePTE(currPTE, tempPTE);        
                             
     }
 
@@ -590,15 +582,18 @@ trimPTE(PPTE PTEaddress)
     // remodified and thus remodified bit must be set in addition to 
     // setting status bits to modified.
     //
-    
+
     if (PFNtoTrim->writeInProgressBit == 1) {
 
         if (oldPTE.u1.hPTE.dirtyBit == 0) {
-            PFNtoTrim->statusBits = STANDBY;
-        }
 
-        else if (oldPTE.u1.hPTE.dirtyBit == 1) {
+            PFNtoTrim->statusBits = STANDBY;
+
+        }
+        else {
             
+            ASSERT(oldPTE.u1.hPTE.dirtyBit == 1);
+
             // notify modified writer that page has been re-modified since initial write began
             PFNtoTrim->remodifiedBit = 1;
 
@@ -610,7 +605,7 @@ trimPTE(PPTE PTEaddress)
     else {
 
         // check dirtyBit to see if page has been modified
-        if (oldPTE.u1.hPTE.dirtyBit == 0 && PFNtoTrim->dirtyBit == 0) {
+        if (oldPTE.u1.hPTE.dirtyBit == 0 && PFNtoTrim->remodifiedBit == 0) {
 
             // add given VA's page to standby list
             enqueuePage(&standbyListHead, PFNtoTrim);
@@ -618,14 +613,21 @@ trimPTE(PPTE PTEaddress)
         } 
         else {
 
-            // ASSERT (oldPTE.u1.hPTE.dirtyBit == 1);
+            if (PFNtoTrim->pageFileOffset != INVALID_BITARRAY_INDEX) {
+
+                ASSERT(PFNtoTrim->remodifiedBit == 1);
+
+                clearPFBitIndex(PFNtoTrim->pageFileOffset);
+
+                PFNtoTrim->pageFileOffset = INVALID_BITARRAY_INDEX;
+            }
 
             //
-            // Since PTE dirty bit is set, we can also clear PFN dirty bit and 
+            // Since PTE dirty bit is set, we can also clear PFN remodified bit and 
             // enqueue to modified list
             //
 
-            PFNtoTrim->dirtyBit = 0;
+            PFNtoTrim->remodifiedBit = 0;
 
             // add given VA's page to modified list;
             wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoTrim);
@@ -633,18 +635,24 @@ trimPTE(PPTE PTEaddress)
         }
     }
 
+    //
+    // Set PTE transitionBit to 1, assign PFN and permissions,
+    // and write out
+    //
 
-
-    // set transitionBit to 1
     newPTE.u1.tPTE.transitionBit = 1;  
+
     newPTE.u1.tPTE.PFN = pageNum;
 
     newPTE.u1.tPTE.permissions = getPTEpermissions(oldPTE);
 
     writePTE(PTEaddress, newPTE);
 
-    releaseJLock(&PFNtoTrim->lockBits);
+    //
+    // Release PFN and PTE lock in order of acquisition
+    //
 
+    releaseJLock(&PFNtoTrim->lockBits);
 
     releasePTELock(PTEaddress);
 
@@ -662,6 +670,7 @@ trimPTE(PPTE PTEaddress)
     }
 
     return TRUE;
+
 }
 
 
@@ -886,7 +895,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
         // if current PTE's lock differs from the previous PTE's lock 
         //
 
-        if (currPTE != startPTE && reprocessPTE == FALSE) {
+        if (currPTE != startPTE && reprocessPTE == FALSE) {  
             
             lockHeld = acquireOrHoldSubsequentPTELock(currPTE, currPTE - 1);
 
@@ -896,22 +905,18 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
         }
 
-        if (lockHeld == FALSE) {
+        ASSERT(lockHeld == TRUE);
 
-            LeaveCriticalSection(&VADListHead.lock);
+        //
+        // Make a shallow copy/"snapshot" of the PTE to edit and check
+        //
 
-            PRINT_ERROR("[commitVA] unable to acquire lock - fatal error\n");
-            return FALSE;
-
-        }
-
-
-        // make a shallow copy/"snapshot" of the PTE to edit and check
         PTE tempPTE;
         tempPTE = *currPTE;
 
-
-        // check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
+        //
+        // Check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
+        //
 
         if (tempPTE.u1.hPTE.validBit == 1) {                            // valid/hardware format
         
@@ -978,6 +983,12 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
                     currPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
                 }
+
+                //
+                // Clear remodified bit (if set) prior to enqueue
+                //
+
+                currPFN->remodifiedBit = 0;
 
                 // enqueue Page to free list
                 enqueuePage(&freeListHead, currPFN);
@@ -1138,7 +1149,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
         //
 
         writePTE(currPTE, tempPTE);
-                
+   
     }
 
     //
