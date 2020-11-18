@@ -90,7 +90,6 @@ writePTE(PPTE dest, PTE value)
 
         ASSERT(currPage->statusBits != AWAITING_FREE);
 
-
     }
     else if (dest->u1.hPTE.validBit == 1) {
 
@@ -103,8 +102,20 @@ writePTE(PPTE dest, PTE value)
 
     }
     else {
+
         currPage = NULL;
+
     }
+
+    //
+    // Either destination and new value are not valid/transition,
+    // OR the current page's PTE index is consistent with the dest
+    // PTE index
+
+    // THis debug is due to dest->valid
+    //->PFn index. The PFN index does not line up
+    //
+    //
 
     ASSERT(currPage == NULL || currPage->PTEindex == PTEindex);
 

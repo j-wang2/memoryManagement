@@ -17,6 +17,22 @@ getZeroPage(BOOLEAN returnLocked)
             return NULL;
         }
 
+        while (returnPFN->refCount != 0) {      // TODO - miscounts real available pages count
+
+            enqueuePage(&zeroListHead, returnPFN);
+
+            releaseJLock(&returnPFN->lockBits);
+
+            returnPFN = dequeueLockedPage(&zeroListHead, TRUE);
+            
+            if (returnPFN == NULL) {
+
+                PRINT("[getPage] zero list empty\n");
+                return NULL;
+
+            } 
+        }
+
         returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         return returnPFN;        
@@ -42,6 +58,19 @@ getFreePage(BOOLEAN returnLocked)
         if (returnPFN == NULL) {
             PRINT("[getPage] free list empty\n");
             return NULL;
+        }
+
+        while (returnPFN->refCount != 0) {      // TODO - miscounts real available pages count
+
+            enqueuePage(&freeListHead, returnPFN);
+
+            releaseJLock(&returnPFN->lockBits);
+
+            returnPFN = dequeueLockedPage(&freeListHead, TRUE);
+            if (returnPFN == NULL) {
+                PRINT("[getPage] free list empty\n");
+                return NULL;
+            } 
         }
 
         // set PF offset to our "null" value in the PFN metadata
@@ -83,6 +112,19 @@ getStandbyPage(BOOLEAN returnLocked)
         if (returnPFN == NULL) {
             PRINT("[getPage] standby list empty\n");
             return NULL;
+        } 
+
+        while (returnPFN->refCount != 0) {      // TODO - miscounts real available pages count
+
+            enqueuePage(&standbyListHead, returnPFN);
+
+            releaseJLock(&returnPFN->lockBits);
+
+            returnPFN = dequeueLockedPageFromTail(&standbyListHead, TRUE);
+            if (returnPFN == NULL) {
+                PRINT("[getPage] standby list empty\n");
+                return NULL;
+            } 
         }
 
         //

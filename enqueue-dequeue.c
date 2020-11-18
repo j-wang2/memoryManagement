@@ -2,6 +2,8 @@
 #include "jLock.h"
 #include "enqueue-dequeue.h"
 
+#define MODIFIED_PAGE_COUNT_THRESHOLD 10
+
 VOID 
 checkAvailablePages(PFNstatus dequeuedStatus)
 {
@@ -93,6 +95,10 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
 
     wakeModifiedWriter = FALSE;
 
+    //
+    // Assert that PFN lock is held upon enqueue function call
+    //
+
     ASSERT(PFN->lockBits != 0);
 
     ASSERT(PFN->remodifiedBit == 0);
@@ -129,7 +135,14 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
                 checkEntry = pageFileDebugArray + j;
 
                 if (checkEntry->currPTE != NULL) {
-                    ASSERT(currPTE != checkEntry->currPTE);
+
+                    //
+                    // This case CAN occur, where a PTE is decommitted and PFN is awaiting free,
+                    // but another thread recommits and decommits and 
+                    // TODO 
+                    //
+
+                    // ASSERT(currPTE != checkEntry->currPTE);
 
                 }
 
@@ -160,10 +173,10 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
 
     if (listStatus == MODIFIED) {
 
-        if (listHead->count > 10) {     // TODO - don't hardcode limit
+        if (listHead->count > MODIFIED_PAGE_COUNT_THRESHOLD) {
 
             wakeModifiedWriter = TRUE;
-            
+
         }
         
     }
@@ -208,7 +221,7 @@ enqueuePageBasic(PlistData listHead, PPFNdata PFN) {
 
     if (listStatus == MODIFIED) {
 
-        if (listHead->count > 10) {     // TODO - don't hardcode limit
+        if (listHead->count > MODIFIED_PAGE_COUNT_THRESHOLD) {
 
             wakeModifiedWriter = TRUE;
 

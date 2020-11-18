@@ -225,10 +225,14 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
 
 
         //
-        // note: no lock needed functionally (simply to satisfy assert in enqueuePage)
+        // Note: no lock needed functionally (simply to satisfy assert in enqueuePage)
         //
 
         acquireJLock(&newPFN->lockBits);
+
+        //
+        // "Reset"/clear pagefile offset & refcount PFN fields
+        //
 
         newPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
@@ -274,18 +278,13 @@ initPageFile(ULONG_PTR diskSize)
         exit(-1);
     }
 
-    //TODO - reserves extra spot for page trade?
-
     #ifndef PAGEFILE_OFF
 
-    // for (int i = 0; i < 5; i++) {
-    //     InterlockedIncrement64(&totalCommittedPages); // (currently used as a "working " page)
-
-    // }
-    InterlockedIncrement64(&totalCommittedPages); // (currently used as a "working " page)
+    InterlockedIncrement64(&totalCommittedPages); // todo - (currently used as a "working " page)
 
     #else
-    for (int i = 0; i < PAGEFILE_PAGES; i++ ){
+    for (int i = 0; i < PAGEFILE_PAGES; i++) {
+
         InterlockedIncrement64(&totalCommittedPages); // (currently used as a "working " page)
 
     }
@@ -810,7 +809,7 @@ modifiedPageWriter()
                 PRINT_ERROR("[trimPTE] failed to set event\n");
             }
 
-            ResetEvent(wakeModifiedWriterHandle); // todo - make sure this is accurate. Tied to mod writer
+            ResetEvent(wakeModifiedWriterHandle);
 
         }
 
@@ -863,8 +862,7 @@ modifiedPageThread(HANDLE terminationHandle)
     // create local handle array
     HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
-    // handleArray[1] = wakeModifiedWriterHandle;       // TODO
-    handleArray[1] = modifiedListHead.newPagesEvent;
+    handleArray[1] = wakeModifiedWriterHandle;
 
 
 
@@ -925,13 +923,6 @@ faultAndAccessTest()
 
         faultStatus testStatus;
         bRes = commitVA(testVA, READ_WRITE, 1);     // commits with READ_ONLY permissions
-
-        // if (bRes != TRUE) {
-
-        //     PRINT_ALWAYS("Unable to commit pages \n");      // TODO
-
-        // }
-
 
         //
         // Write->Trim->Access
@@ -1008,7 +999,6 @@ faultAndAccessTest()
         #endif
 
         faultStatus testStatus = accessVA(testVA, READ_WRITE);        // to TEST VAs
-        // faultStatus testStatus = pageFault(testVA, READ_ONLY);      // to FAULT VAs
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);

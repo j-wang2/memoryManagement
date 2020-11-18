@@ -133,7 +133,6 @@ clearPFBitIndex(ULONG_PTR pfVA)
     // if pagefile address is invalid, return
     if (pfVA == INVALID_BITARRAY_INDEX) {
 
-        // ASSERT(FALSE);
         return;
 
     }
@@ -194,8 +193,7 @@ clearPFBitIndex(ULONG_PTR pfVA)
 
     #endif
 
-    ASSERT(FALSE);
-    
+    // TODO - if not found, debug break?
 }
 
 

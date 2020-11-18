@@ -180,6 +180,11 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
         ASSERT(currEventNode != NULL && currEvent != NULL);
 
+        //
+        // Bump PFN refCount, since a transition-faulting thread is now awaiting the 
+        // pagefile read completion
+        //
+
         transitionPFN->refCount++;
 
         releaseJLock(&transitionPFN->lockBits);
@@ -201,8 +206,8 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
         //
         // Assert PFN has not changed since release/re-acquisition of page lock,
-        // since refcount is bumped
-        // todo assert that PFN has nto changed ( by checking ripevent node & PTEindex)
+        // since refcount is bumped (and this count must be 0 before making any
+        // page changes in the TODO functions)
         //
 
         ASSERT(currEventNode == transitionPFN->readInProgEventNode);
@@ -211,7 +216,13 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
         transitionPFN->refCount--;
 
-        if (transitionPFN->refCount == 0){   // todo - change to non interlocked decrement and add refcount PFN
+        //
+        // If current thread is the last waiting thread, clear the 
+        // readInProg node from the PFN field and re-enqueue
+        // to event list.
+        //
+
+        if (transitionPFN->refCount == 0) {   // todo - change to non interlocked decrement and add refcount PFN
                     // needs to be fixed so that any enqueue to list checks this so there isnt a repurpose without ccheckig read in rpog bit
             
             transitionPFN->readInProgEventNode = NULL;
@@ -426,15 +437,21 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     freedPFN->PTEindex = masterPTE - PTEarray;
 
     //
-    // Assign PFN pagefile offset field to PTE pagefile index
+    // Assqign PFN pagefile offset field to PTE pagefile index
     // so that upon possible failure it can be freed
     //
 
     freedPFN->pageFileOffset = snapPTE.u1.pfPTE.pageFileIndex;
 
     //
-    // Does not need to be an atomic operation since event node cannot yet be referenced via PTE
+    // Initialize PFN refCount to 1, since page is being referenced upon read by
+    // current thread until completion of pagefile read. Does not need to be an
+    // atomic operation since page lock is held and event node cannot yet be 
+    // referenced via PTE (since PTE lock is held untnil transition state
+    // is set)
     //
+
+    ASSERT(freedPFN->refCount == 0);
 
     freedPFN->refCount = 1;
 
@@ -488,16 +505,11 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     //
     // While page is being read in from filesystem, the only PTE state change that 
-    // can occur is a decommit
+    // can occur is a decommit. However, a subsequent recommit/pagefault/trim/etc 
+    // can very well occur post-initial decommit
     //
 
     if (newPTE.u1.ulongPTE != masterPTE->u1.ulongPTE) {
-
-        //
-        // Verify a decommit has occurred
-        //
-
-        ASSERT(masterPTE->u1.ulongPTE == 0 || masterPTE->u1.dzPTE.decommitBit == 1);
 
         acquireJLock(&freedPFN->lockBits);
 
@@ -506,7 +518,9 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         // todo - do i need to clear pfn dirty bit?
 
         //
-        // set readInProgressBit to 0 and set event so other threads that have transition faulted on this PTE can proceed
+        // Clear readInProgressBit and set event to notify any other threads
+        // in transition pagefault that have waited on this PTE's
+        // pagefile read completion.
         //
 
         ASSERT(freedPFN->readInProgressBit == 1);
@@ -516,6 +530,12 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         SetEvent(readInProgEventNode->event);
 
         freedPFN->refCount--;
+
+        //
+        // If current thread is the last waiting thread, clear the 
+        // readInProg node from the PFN field and re-enqueue
+        // to event list.
+        //
 
         if (freedPFN->refCount == 0) {
 
@@ -594,9 +614,6 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     // put PFN's corresponding pageNum into PTE
     newPTE.u1.hPTE.PFN = pageNum;
-    
-    // compiler writes out as indivisible store
-    writePTE(masterPTE, newPTE);
 
     DWORD oldPermissions;
 
@@ -621,7 +638,9 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     acquireJLock(&freedPFN->lockBits);
 
     //
-    // set readInProgressBit to 0 and set event so other threads that have transition faulted on this PTE can proceed
+    // Clear readInProgressBit and set event to notify any other threads
+    // in transition pagefault that have waited on this PTE's
+    // pagefile read completion.
     //
 
     ASSERT(freedPFN->readInProgressBit == 1);
@@ -635,17 +654,10 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     ASSERT(freedPFN->pageFileOffset == snapPTE.u1.pfPTE.pageFileIndex);
 
     //
-    // Now that PFN lock is held, check clearIndex flag in order to 
-    // decide whether pageFileOffset field must be cleared from PFN
-    //
-
-    if (clearIndex == TRUE) {
-
-        freedPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
-
-    }
-
-    
+    // If current thread is the last waiting thread, clear the 
+    // readInProg node from the PFN field and re-enqueue
+    // to event list.
+    //    
     
     SetEvent(readInProgEventNode->event);
 
@@ -657,10 +669,25 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
         enqueueEvent(&readInProgEventListHead, readInProgEventNode);
 
+        // TODO - enqueue to list?
+
+    }
+
+    //
+    // Vefore PFN lock is released, check clearIndex flag in order to 
+    // decide whether pageFileOffset field must be cleared from PFN
+    //
+
+    if (clearIndex == TRUE) {
+
+        freedPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
+
     }
 
     releaseJLock(&freedPFN->lockBits);
     
+    // compiler writes out as indivisible store
+    writePTE(masterPTE, newPTE);
 
     return SUCCESS;
 

@@ -536,13 +536,20 @@ trimPTE(PPTE PTEaddress)
 
     wakeModifiedWriter = FALSE;
 
+    //
+    // Acquire PTE lock - although it may also be acquired in trimming function in 
+    // main, the recursive nature of underlying CRITICAL_SECTION locking functionality
+    // permits the re-acquisition of a critical section by the owning thread
+    //
 
-    // acquire PTE lock
-    acquirePTELock(PTEaddress);     // TODO - potential deadlock issue? When trimming in main
+    acquirePTELock(PTEaddress);
 
     oldPTE = *PTEaddress;
 
-    // check if PTE's valid bit is set - if not, can't be trimmed and return failure
+    //
+    // Check if PTE's valid bit is set - if not, can't be trimmed and return failure
+    //
+    
     if (oldPTE.u1.hPTE.validBit == 0) {
 
         releasePTELock(PTEaddress);

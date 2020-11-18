@@ -14,9 +14,13 @@
 
 /*********** temporary testing macros ************/
 // #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
-#define CHECK_PFNS
-// #define PAGEFILE_OFF
-#define PAGEFILE_PFN_CHECK
+// #define CHECK_PFNS
+// #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing
+                                                // program to run sans pagefile
+
+// #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
+                                                // for the pagefile that includes additional information
+
 #define TEMP_TESTING                                // temporary workaround for PF due to app verifier
 #define NUM_THREADS 5
 #define TESTING_ZERO                                // toggles zero page thread
@@ -69,7 +73,7 @@
 
 /***************** print macros ******************/
 #define PRINT(fmt, ...) if (debugMode == TRUE) { printf(fmt, __VA_ARGS__); }
-#define PRINT_ERROR(fmt, ...) if (debugMode == TRUE) { fprintf(stderr, fmt, __VA_ARGS__); } ASSERT(FALSE); 
+#define PRINT_ERROR(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__); ASSERT(FALSE); 
 #define PRINT_ALWAYS(fmt, ...) printf(fmt, __VA_ARGS__)
 
 
@@ -135,8 +139,8 @@ typedef struct _PFNdata {
     ULONG64 writeInProgressBit: 1;          // Overloaded bit - also used to signify to page trader that page could be being zeroed
     ULONG64 readInProgressBit: 1;
     ULONG64 refCount: 16;                
-    ULONG64 remodifiedBit: 1;        
-    ULONG64 dirtyBit: 1;
+    ULONG64 remodifiedBit: 1;      
+    ULONG64 padding: 20;  
     volatile LONG lockBits;                // 31 free bits if necessary
     PeventNode readInProgEventNode;
 } PFNdata, *PPFNdata;
