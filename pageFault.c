@@ -97,8 +97,6 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 }
 
 
-volatile int ctrs;
-
 faultStatus
 transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 {
@@ -515,8 +513,6 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
         ASSERT(freedPFN->statusBits == AWAITING_FREE);
 
-        // todo - do i need to clear pfn dirty bit?
-
         //
         // Clear readInProgressBit and set event to notify any other threads
         // in transition pagefault that have waited on this PTE's
@@ -544,6 +540,12 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
             enqueueEvent(&readInProgEventListHead, readInProgEventNode);
 
         }
+
+        //
+        // Release PFN in awaiting free state (i.e. clear
+        // pagefile space, reset pagefileoffset field, 
+        // clear remodified bit)
+        //
 
         releaseAwaitingFreePFN(freedPFN);
 

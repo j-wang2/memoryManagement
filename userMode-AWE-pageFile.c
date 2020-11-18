@@ -1008,14 +1008,8 @@ faultAndAccessTest()
     /***************** DECOMMITTING AND CHECKING VAs **************/
 
     testVA = leafVABlock;
-    bRes = decommitVA(testVA, virtualMemPages << PAGE_SHIFT);
-
-    if (bRes != TRUE) {
-
-        DebugBreak();
-
-    }
-
+    // bRes = decommitVA(testVA, virtualMemPages << PAGE_SHIFT);        // todo
+    bRes = decommitVA(testVA, 512 << PAGE_SHIFT);       // todo
 
     return TRUE;
 
@@ -1655,6 +1649,11 @@ testRoutine()
 {
     PRINT_ALWAYS("[testRoutine]\n");
 
+    // ULONG_PTR vadSize = virtualMemPages;
+    ULONG_PTR vadSize = 512;
+    
+    createVAD(NULL, vadSize, READ_WRITE, TRUE);         // MEM_COMMIT vad (todo)
+    // createVAD(NULL, vadSize, READ_WRITE, FALSE);        // MEM_RESERVE vad (todo)
 
     #ifdef MULTITHREADING
 
@@ -1973,10 +1972,6 @@ initializeVirtualMemory()
     //
 
     VADBitArray = VirtualAlloc(NULL, virtualMemPages/(sizeof(ULONG_PTR) * 8) + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-
-    // createVAD(NULL, virtualMemPages, READ_WRITE, TRUE);         // MEM_COMMIT vad
-    createVAD(NULL, virtualMemPages, READ_WRITE, FALSE);        // MEM_RESERVE vad
-
 
     // create local PFN metadata array
     initPFNarray(aPFNs, numPagesReturned);

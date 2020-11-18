@@ -109,13 +109,12 @@ reserveBitRange(ULONG_PTR bits, PULONG_PTR bitArray, ULONG_PTR bitArraySize)
 
         bitIndex = i * BITS_PER_FRAME + j - bits;
 
-        printf("bitIndex %llu\n", bitIndex);
         setBitRange(TRUE, bitIndex, bits, bitArray);
         return bitIndex;
 
     } else {
 
-        printf("[reserveBitRange] unable to find free bit range\n");
+        PRINT_ALWAYS("[reserveBitRange] unable to find free bit range\n");
         return INVALID_BITARRAY_INDEX;
 
     }
@@ -140,8 +139,6 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
 
     i = startBitIndex / (sizeof(ULONG_PTR) * 8);
     j = startBitIndex % (sizeof(ULONG_PTR) * 8);
-
-    printf("i: %llu \n", i);
 
     if (j != 0) {
 
@@ -169,9 +166,6 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
 
     }
 
-    printf("numPages: %llu\n", numPages);
-    printf("i: %llu \n", i);
-
     //
     // Now that operations are ULONG_PTR aligned, go fast
     // AND increment i (as the index of ULONG_PTR denomination)
@@ -193,10 +187,6 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
         numPages %= 64;
 
     }
-
-    printf("numPages: %llu\n", numPages);
-    printf("i: %llu \n", i);
-
 
     for (int n = 0; n < numPages; n++) {
 

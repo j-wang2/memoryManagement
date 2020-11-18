@@ -232,14 +232,27 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
     if (currVAD == NULL) {
 
         LeaveCriticalSection(&VADListHead.lock);
-        PRINT_ERROR("[commitVA] Requested commit startVA does not fall within a VAD\n");
+        PRINT("[commitVA] Requested commit startVA does not fall within a VAD\n");
         return FALSE;
 
     }
 
+
+    //
+    // Verify requested commit falls within a single VAD.
+    // requested number of pages must be greater than the number of the pages in teh vad
+    //
+
     VADStartPTE = getPTE(currVAD->startVA);
 
-    if (currVAD->numPages - (startPTE - VADStartPTE) < numPages) {
+    ULONG_PTR commitNum;
+
+    commitNum = currVAD->numPages - (startPTE - VADStartPTE);
+
+    // numPages + (startPTE - VADstartPTE) < currVAD->numPages
+    // 1 + 4 < 5
+
+    if (commitNum < numPages) {
 
         LeaveCriticalSection(&VADListHead.lock);
         PRINT_ERROR("[commitVA] Requested commit does not fall within a single VAD\n");
@@ -870,17 +883,21 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
     if (currVAD == NULL) {
 
         LeaveCriticalSection(&VADListHead.lock);
-        PRINT("[commitVA] Requested commit startVA does not fall within a VAD\n");
+        PRINT_ALWAYS("[commitVA] Requested decommit startVA does not fall within a VAD\n");
         return FALSE;
 
     }
 
     VADStartPTE = getPTE(currVAD->startVA);
 
-    if (currVAD->numPages - (startPTE - VADStartPTE) < numPages) {
+    ULONG_PTR decommitNum;
+
+    decommitNum = currVAD->numPages - (startPTE - VADStartPTE);
+
+    if (decommitNum < numPages) {
 
         LeaveCriticalSection(&VADListHead.lock);
-        PRINT("[commitVA] Requested commit does not fall within a single VAD\n");
+        PRINT_ALWAYS("[commitVA] Requested commit does not fall within a single VAD\n");
         return FALSE;
 
     }
@@ -1214,12 +1231,14 @@ commitPages (ULONG_PTR numPages)
         }
 
         tempVal = InterlockedCompareExchange64(&totalCommittedPages, oldVal + numPages, oldVal);
-
+        
         //
         // Compare exchange successful
         //
 
         if (tempVal == oldVal) {
+
+            ASSERT(totalCommittedPages <= totalMemoryPageLimit);
 
             return TRUE;
 

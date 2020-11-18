@@ -14,11 +14,11 @@
 
 /*********** temporary testing macros ************/
 // #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
-// #define CHECK_PFNS
+#define CHECK_PFNS
 // #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing
                                                 // program to run sans pagefile
 
-// #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
+#define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
                                                 // for the pagefile that includes additional information
 
 #define TEMP_TESTING                                // temporary workaround for PF due to app verifier
