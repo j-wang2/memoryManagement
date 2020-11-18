@@ -152,8 +152,12 @@ clearPFBitIndex(ULONG_PTR pfVA)
         PTE logPTE;
         logPTE.u1.ulongPTE = MAXULONG_PTR;
 
-        logEntry( currEntry.currPTE, *currEntry.currPTE, logPTE, &currEntry.PFNdata);
+        #ifdef PTE_CHANGE_LOG
 
+            logEntry( currEntry.currPTE, *currEntry.currPTE, logPTE, &currEntry.PFNdata);
+
+        #endif
+        
         memset(&pageFileDebugArray[pfVA], 0, sizeof(pageFileDebug) );
 
         LeaveCriticalSection(&pageFileLock);
@@ -251,8 +255,15 @@ writePageToFileSystem(PPFNdata PFNtoWrite, ULONG_PTR expectedSig)
 
     }
 
-    ASSERT(expectedSig == * (PULONG_PTR) modifiedWriteVA || * (PULONG_PTR) modifiedWriteVA == 0 );
+    //
+    // Verify signature written to filesystem is expected (either VA signature or 0)
+    //
 
+    #ifdef VERIFY_ADDRESS_SIGNATURES
+
+        ASSERT(expectedSig == * (PULONG_PTR) modifiedWriteVA || * (PULONG_PTR) modifiedWriteVA == 0 );
+
+    #endif
 
     // get location in pagefile from bitindex
     PVOID PFLocation;
@@ -339,7 +350,11 @@ readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex, ULONG_PTR exp
     // Verify signature is coming back as expected (either VA signature or 0)
     //
 
-    ASSERT(expectedSig == * (PULONG_PTR) readPFVA || * (PULONG_PTR) readPFVA == 0 );
+    #ifdef VERIFY_ADDRESS_SIGNATUREs
+
+        ASSERT(expectedSig == * (PULONG_PTR) readPFVA || * (PULONG_PTR) readPFVA == 0 );
+
+    #endif
 
     // unmap VA from page - PFN is now filled w contents from pagefile
     if (!MapUserPhysicalPages(readPFVA, 1, NULL)) {

@@ -11,26 +11,25 @@
 #pragma comment(lib, "MinCore.lib")
 
 
+/******** Key functionality macros ********/
+#define NUM_THREADS 5
+#define MULTIPLE_MAPPINGS                           // enables multiple mappings
 
-/*********** temporary testing macros ************/
-// #define CHECK_PAGEFILE                              // tests standby -> pf format repurposing
+
+/*********** Testing macros ************/
 #define CHECK_PFNS
 // #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing
                                                 // program to run sans pagefile
-
+// #define PTE_CHANGE_LOG
 #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
                                                 // for the pagefile that includes additional information
-
-#define TEMP_TESTING                                // temporary workaround for PF due to app verifier
-#define NUM_THREADS 5
+#define VERIFY_ADDRESS_SIGNATURES
+#define AV_TEMP_TESTING                                // temporary workaround for PF due to app verifier
 #define TESTING_ZERO                                // toggles zero page thread
 #define TESTING_MODIFIED                            // toggles modified page writer thread
 #define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
-
-#define MULTIPLE_MAPPINGS                           // enables multiple mappings
 #define CONTINUOUS_FAULT_TEST
 // #define TRADE_PAGES
-
 
 
 /*********** number of physical memory pages to allocate (+ PF pages for total memory) **********/

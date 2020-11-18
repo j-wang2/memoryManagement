@@ -1,8 +1,9 @@
 #include "userMode-AWE-pageFile.h"
 
-
-#define PTE_CHANGE_LOG
-
+//
+// Logging functions enabled only if PTE_CHANGE_LOG
+// is defined
+//
 
 #ifdef PTE_CHANGE_LOG
 
@@ -19,21 +20,19 @@ typedef struct _PTETrace {
 
     PVOID stackTrace[4];
 
-
 } PTETrace, *PPTETrace;
 
 PTETrace PTEHistoryLog[LOG_ARRAY_SIZE];
 
 LONG currLogIndex;
 
-#endif
 
 VOID
 logEntry(PPTE dest, PTE oldValue, PTE newValue, PPFNdata currPage)
 {
+
     LONG index;
     PPTETrace currTrace;
-
 
     index = InterlockedIncrementAcquire(&currLogIndex);
     index &= (LOG_ARRAY_SIZE - 1);
@@ -61,9 +60,9 @@ logEntry(PPTE dest, PTE oldValue, PTE newValue, PPFNdata currPage)
 
     }
 
-
-
 }
+
+#endif
 
 VOID
 writePTE(PPTE dest, PTE value)

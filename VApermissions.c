@@ -20,7 +20,7 @@ accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions)
 
     while (PFstatus == SUCCESS || PFstatus == PAGE_STATE_CHANGE ) {
         
-        #ifdef TEMP_TESTING
+        #ifdef AV_TEMP_TESTING
 
         //
         // For special pool/application verifier

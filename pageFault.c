@@ -256,7 +256,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         // space corresponds with the provided PFN
         //
 
-        if (transitionPFN->writeInProgressBit == 0 && transitionPFN->statusBits == STANDBY) {       // todo-  verify second half of this statement
+        if (transitionPFN->writeInProgressBit == 0 && transitionPFN->statusBits == STANDBY) {
 
             //
             // Clear pagefile space (reliant on PFN pagefile offset field 
@@ -265,7 +265,10 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
             clearPFBitIndex(transitionPFN->pageFileOffset);
 
-            // clear pagefile pointer out of PFN
+            //
+            // Clear pagefile pointer out of PFN
+            //
+
             transitionPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         } 
@@ -482,13 +485,29 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
 
     //
-    // Read in from filesystem
+    // Read page contents in from filesystem
     //
 
     bResult = FALSE;
 
-    ULONG_PTR signature = (ULONG_PTR) virtualAddress & ~(PAGE_SIZE - 1);    // TODO (remove/ifdef)
+    //
+    // If address verification is enabled (asserts that the contents
+    // of a given page corresponds to the virtual address it is mapped
+    // or standby at)
+    //
+
+    ULONG_PTR signature;
+
+    #ifdef VERIFY_ADDRESS_SIGNATURES
+
+        signature = (ULONG_PTR) virtualAddress & ~(PAGE_SIZE - 1);
     
+    #else
+
+        signature = NULL;
+
+    #endif
+
     while (bResult != TRUE) {
 
         bResult = readPageFromFileSystem(pageNum, snapPTE.u1.pfPTE.pageFileIndex, signature);

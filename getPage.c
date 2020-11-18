@@ -224,26 +224,6 @@ getPage(BOOLEAN returnLocked)
 
     PPFNdata returnPFN;
 
-    #ifdef CHECK_PAGEFILE                               // to check standby -> pf repurposing
-    // standby list
-    returnPFN = getStandbyPage(returnLocked);
-    if (returnPFN != NULL) {
-        ULONG_PTR PFN;
-        PFN = returnPFN - PFNarray;
-
-        // zeroPage (does not update status bits in PFN metadata)
-        zeroPage(PFN);
-
-        // set PF offset to our "null" value in the PFN metadata
-        returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
-
-        PRINT("[getPage] Allocated PFN from standby list\n");
-
-        return returnPFN;   
-    }
-    #endif
-
-
     // Zero list
     returnPFN = getZeroPage(returnLocked);
     if (returnPFN != NULL) {

@@ -150,11 +150,13 @@ LoggedSetLockPagesPrivilege ( HANDLE hProcess,
 
 
 BOOL
-getPrivilege ()
+getPrivilege()
 {
+
     BOOL bResult;
     bResult = LoggedSetLockPagesPrivilege( GetCurrentProcess(), TRUE );
     return bResult;
+
 }
 
 
@@ -162,13 +164,11 @@ VOID
 initVABlock(ULONG_PTR numPages)
 {
 
-
     #ifdef MULTIPLE_MAPPINGS
 
     MEM_EXTENDED_PARAMETER extendedParameters = {0};
     extendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
     extendedParameters.Handle = physicalPageHandle;
-
 
     leafVABlock = VirtualAlloc2(NULL, NULL, numPages << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &extendedParameters, 1);      // equiv to numVAs*PAGE_SIZE
 
@@ -178,13 +178,14 @@ initVABlock(ULONG_PTR numPages)
     #endif
 
     if (leafVABlock == NULL) {
+
         PRINT_ERROR("[initVABlock] unable to initialize VA block\n");
         exit(-1);
+
     }
 
     // Does not need to be checked for overflow since VirtualAlloc will not return a value
     leafVABlockEnd = (PVOID) ( (ULONG_PTR)leafVABlock + ( numPages << PAGE_SHIFT ) );   // equiv to numPages*PAGE_SIZE
-
 
 }
 
@@ -194,24 +195,49 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
 {
 
     PVOID commitCheckVA; 
-    ULONG_PTR maxPFN = 0;
+    ULONG_PTR maxPFN;
+    
+    //
+    // Initialize initial "maximum" value to 0 (replaced in subsequent loop)
+    //
 
-    // loop through aPFNs array (from AllocateUserPhysicalPages) to find largest numerical PFN
+    maxPFN = 0;
+
+    //
+    // Loop through aPFNs array (from AllocateUserPhysicalPages) to find largest numerical PFN
+    //
+
     for (int i = 0; i < numPages; i++) {
+
+        //
+        // If current PFN is larger than current maximum, replace
+        //
+
         if (maxPFN < aPFNs[i]) {
+
             maxPFN = aPFNs[i];
+
         }
+
     }
 
+    //
     // VirtualAlloc (with MEM_RESERVE) PFN metadata array
+    //
+
     PFNarray = VirtualAlloc(NULL, (maxPFN+1)*(sizeof(PFNdata)), MEM_RESERVE, PAGE_READWRITE);
 
     if (PFNarray == NULL) {
+
         PRINT_ERROR("Could not allocate for PFN metadata array\n");
         exit(-1);
+
     }
 
-    // loop through all PFNs, MEM_COMMITTING PFN subsections and enqueueing to free for each page
+    //
+    // Loop through all PFNs, MEM_COMMITTING PFN subsections and enqueueing to free for each page
+    //
+
     for (int i = 0; i < numPages; i++) {
         PPFNdata newPFN;
         newPFN = PFNarray + aPFNs[i];
@@ -254,13 +280,18 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
 VOID
 initPTEarray(ULONG_PTR numPages)
 {    
-
+    
+    //
     // VirtualAlloc (with MEM_RESERVE | MEM_COMMIT) for PTE array
+    //
+
     PTEarray = VirtualAlloc(NULL, numPages*(sizeof(PTE)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 
     if (PTEarray == NULL) {
+
         PRINT_ERROR("Could not allocate for PTEarray\n");
         exit(-1);
+
     }
 
 }
@@ -270,12 +301,17 @@ VOID
 initPageFile(ULONG_PTR diskSize) 
 {
 
+    //
     // VirtualAlloc (with MEM_RESERVE | MEM_COMMIT) for pageFileVABlock
+    //
+
     pageFileVABlock = VirtualAlloc(NULL, diskSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 
     if (pageFileVABlock == NULL) {
+
         PRINT_ERROR("Could not allocate for pageFile\n");
         exit(-1);
+
     }
 
     #ifndef PAGEFILE_OFF
@@ -297,16 +333,23 @@ ULONG_PTR
 allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs) 
 {
 
-    // secure privilege for the code
-    BOOL privResult;
-    privResult = getPrivilege();
-    if (privResult != TRUE) {
+    BOOL bResult;
+    ULONG_PTR numPagesAllocated;
+
+    //
+    // Secure privilege for the code
+    //
+
+    bResult = getPrivilege();
+
+    if (bResult != TRUE) {
+
         PRINT_ERROR("could not get privilege successfully \n");
         exit(-1);
+
     }    
 
 
-    ULONG_PTR numPagesAllocated;
     numPagesAllocated = numPages;
 
 
@@ -330,8 +373,10 @@ allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs)
                                             1 );
     
     if (physicalPageHandle == NULL) {
+
         PRINT_ERROR("could not create file mapping\n");
         exit(-1);
+
     }
 
 
@@ -341,20 +386,22 @@ allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs)
 
     #endif
 
-    BOOL bResult;
     bResult = AllocateUserPhysicalPages(physicalPageHandle, &numPagesAllocated, aPFNs);
 
     if (bResult != TRUE) {
+
         PRINT_ERROR("could not allocate pages successfully \n");
         exit(-1);
+
     }
 
     if (numPagesAllocated != numPages) {
+
         PRINT("allocated only %llu pages out of %u pages requested\n", numPagesAllocated, NUM_PAGES);
+
     }
 
     return numPagesAllocated;
-
 
 }
 
@@ -362,8 +409,10 @@ allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs)
 BOOLEAN
 zeroPage(ULONG_PTR PFN)
 {
-
+    
+    PVOID zeroVA;
     PVANode zeroVANode;
+
     zeroVANode = dequeueLockedVA(&zeroVAListHead);
 
     while (zeroVANode == NULL) {
@@ -376,24 +425,40 @@ zeroPage(ULONG_PTR PFN)
 
     }
 
-    PVOID zeroVA;
     zeroVA = zeroVANode->VA;
 
-    // map given page to the "zero" VA
+    //
+    // Map PFN to the "zero" VA
+    //
+
     if (!MapUserPhysicalPages(zeroVA, 1, &PFN)) {
-        PRINT_ERROR("error remapping zeroVA\n");
+
         enqueueVA(&zeroVAListHead, zeroVANode);
+
+        PRINT_ERROR("error remapping zeroVA\n");
+
         return FALSE;
+
     }
 
+    //
+    // Zero page
+    //
 
     memset(zeroVA, 0, PAGE_SIZE);
 
-    // unmap zeroVA from page - PFN is now ready to be alloc'd
+    //
+    // Unmap zeroVA from page - PFN is now ready to be alloc'd
+    //
+
     if (!MapUserPhysicalPages(zeroVA, 1, NULL)) {
-        PRINT_ERROR("error zeroing page\n");
+
         enqueueVA(&zeroVAListHead, zeroVANode);
+
+        PRINT_ERROR("error zeroing page\n");
+
         return FALSE;
+
     }
 
     enqueueVA(&zeroVAListHead, zeroVANode);
@@ -406,13 +471,16 @@ zeroPage(ULONG_PTR PFN)
 BOOLEAN
 zeroPageWriter()
 {
-    //
-    // Acquires & releases both list and page locks
-    //
 
     PPFNdata PFNtoZero;
-    PFNtoZero = dequeueLockedPage(&freeListHead, TRUE);
+    ULONG_PTR pageNumtoZero;
 
+    //
+    // Acquires & releases list lock, but retains
+    // PFN lock
+    //
+
+    PFNtoZero = dequeueLockedPage(&freeListHead, TRUE);
 
     if (PFNtoZero == NULL) {
 
@@ -423,28 +491,32 @@ zeroPageWriter()
 
     //
     // Set overloaded "writeinprogress" bit (to signify page is currently being zeroed)
-    // Note: write in progress is also set by modified page writer, but in a different context (todo check)
+    // Note: write in progress is also set by modified page writer, but in a different context
     //
 
     PFNtoZero->writeInProgressBit = 1;
 
     releaseJLock(&PFNtoZero->lockBits);
 
+    //
+    // Derive physical page number from metadata
+    //
 
-    // Derive page number from PFN metadata
-    ULONG_PTR pageNumtoZero;
     pageNumtoZero = PFNtoZero - PFNarray;
 
-
+    //
     // zero the page contents, does not update status bits in PFN metadata
     // note: can be page traded within this time, where status bits could change from ZERO to AWAITING_QUARANTINE
-    zeroPage(pageNumtoZero);
+    //
 
+    zeroPage(pageNumtoZero);
 
     acquireJLock(&PFNtoZero->lockBits);
 
+    //
+    // Clear "writeinprogress" bit (to signify page has been zeroed and can now be traded, once lock is released)
+    //
 
-    // clear "writeinprogress" bit (to signify page has been zeroed and can now be traded, once lock is released)
     PFNtoZero->writeInProgressBit = 0;
 
     if (PFNtoZero->statusBits == AWAITING_QUARANTINE) {
@@ -454,12 +526,15 @@ zeroPageWriter()
 
     } else {
 
-
         #ifdef PAGEFILE_PFN_CHECK
-        enqueuePageBasic(&zeroListHead, PFNtoZero);
+
+            enqueuePageBasic(&zeroListHead, PFNtoZero);
+
         #else
-        // enqueue to zeroList (updates status bits in PFN metadata)
-        enqueuePage(&zeroListHead, PFNtoZero);
+
+            // enqueue to zeroList (updates status bits in PFN metadata)
+            enqueuePage(&zeroListHead, PFNtoZero);
+
         #endif
 
     }
@@ -485,7 +560,10 @@ zeroPageThread(HANDLE terminationHandle)
     handleArray[0] = terminationHandle;
     handleArray[1] = freeListHead.newPagesEvent;
 
-    // zero pages until none left to zero
+    //
+    // Zeroes pages until none remaining on free list
+    //
+
     while (TRUE) {
 
         BOOLEAN bres;
@@ -500,21 +578,36 @@ zeroPageThread(HANDLE terminationHandle)
 
         if (bres == FALSE) {
 
-            DWORD retVal = WaitForMultipleObjects(2, handleArray, FALSE, INFINITE);
-            DWORD index = retVal - WAIT_OBJECT_0;
+            DWORD retVal;
+            DWORD index;
+
+            //
+            // Wait for either termination event or more pages added to free list
+            //
+
+            retVal = WaitForMultipleObjects(2, handleArray, FALSE, INFINITE);
+
+            index = retVal - WAIT_OBJECT_0;
+
+            //
+            // If event set is the terminate threads event, return from function
+            //
 
             if (index == 0) {
+
                 PRINT_ALWAYS("zeropagethread - numPages moved to zero list : %d, numWaited : %d\n", numZeroed, numWaited);
                 return 0;
+
             }
 
-            //  PRINT("NEW PAGES in free list\n");
             numWaited++;
 
             continue;
+
         }
+
         numZeroed++;
-        // return TRUE;
+
     }
 
 }
@@ -528,17 +621,23 @@ freePageTestWriter()
     PFNtoFree = dequeueLockedPage(&zeroListHead, FALSE);
 
     if (PFNtoFree == NULL) {
+
         PRINT("zero list empty - could not write out\n");
         return FALSE;
+
     }
 
     acquireJLock(&PFNtoFree->lockBits);
 
     #ifdef PAGEFILE_PFN_CHECK
-    enqueuePageBasic(&freeListHead, PFNtoFree);
+
+        enqueuePageBasic(&freeListHead, PFNtoFree);
+
     #else
-    // enqueue to freeList (updates status bits in PFN metadata)
-    enqueuePage(&freeListHead, PFNtoFree);
+
+        // enqueue to freeList (updates status bits in PFN metadata)
+        enqueuePage(&freeListHead, PFNtoFree);
+
     #endif
 
     releaseJLock(&PFNtoFree->lockBits);
@@ -559,21 +658,47 @@ freePageTestThread(HANDLE terminationHandle)
     handleArray[0] = terminationHandle;
     handleArray[1] = zeroListHead.newPagesEvent;
 
-    // zero pages until none left to zero
+    //
+    // Moves pages from zero list to free list until none remaining on 
+    // zero list. 
+    //
+    // Important note: this DETRACTS functionally from the program
+    // (since zeroing pages takes time), and is simply to increase
+    // the artificial load on the program in testing.
+    //
+    
     while (TRUE) {
+
         BOOLEAN bres;
+
         bres = freePageTestWriter();
+
         if (bres == FALSE) {
 
-            DWORD retVal = WaitForMultipleObjects(2, handleArray, FALSE, INFINITE);
-            DWORD index = retVal - WAIT_OBJECT_0;
+            DWORD retVal;
+            DWORD index;
+
+            //
+            // Wait for either terminate threads event to be set or for new pages
+            // to be enqueued to the zero list
+            //
+
+            retVal = WaitForMultipleObjects(2, handleArray, FALSE, INFINITE);
+            
+            index = retVal - WAIT_OBJECT_0;
+
+            //
+            // If event set is the terminate threads event, return from function
+            //
 
             if (index == 0) {
+
                 PRINT_ALWAYS("freepagetestthread - numPages moved to free list: %d, numWaited : %d \n", numFreed, numWaited);
+                
                 return 0;
+
             }
 
-            //  PRINT("NEW PAGES in zero list\n");
             numWaited++;
             continue;
         }
@@ -614,9 +739,6 @@ releaseAwaitingFreePFN(PPFNdata PFNtoFree)
 
 }
 
-
-
-volatile ULONG_PTR ctrs[4];
 
 BOOLEAN
 modifiedPageWriter()
@@ -691,28 +813,41 @@ modifiedPageWriter()
 
     acquireJLock(&PFNtoWrite->lockBits);
 
-    // since we've marked the PFN as write in progress, it CANNOT be in zero or free state
+    //
+    // Since we've marked the PFN as write in progress, it CANNOT be in zero or free state
     //  - would require a decommit (via decommitVA), which checks the writeInProgressBit
     //  - so, we can assert that it is in neither free nor zero
+    //
+
     ASSERT (PFNtoWrite->statusBits != FREE && PFNtoWrite->statusBits != ZERO);
 
     //
-    // clear write in progress bit (since page has been written)
+    // Clear write in progress bit (since page has been written)
     //
 
     ASSERT(PFNtoWrite->writeInProgressBit == 1);
 
     PFNtoWrite->writeInProgressBit = 0;
 
-    PTE logPTE;
-    logPTE.u1.ulongPTE = bResult;
+    #ifdef PTE_CHANGE_LOG
 
-    PTE zeroPTE;
-    zeroPTE.u1.ulongPTE = 0;
+        PTE logPTE;
+        PTE zeroPTE;
 
-    logEntry( PTEarray + PFNtoWrite->PTEindex, logPTE, zeroPTE, PFNtoWrite);
+        logPTE.u1.ulongPTE = bResult;
 
-    // check if PFN has been decommitted
+        zeroPTE.u1.ulongPTE = 0;
+
+        logEntry( PTEarray + PFNtoWrite->PTEindex, logPTE, zeroPTE, PFNtoWrite);
+
+    #endif
+
+    //
+    // If PFN has been decommitted during the pagefile write
+    // (while page lock was released), release the awaiting free
+    // PFN
+    //
+
     if (PFNtoWrite->statusBits == AWAITING_FREE) {
         
         releaseAwaitingFreePFN(PFNtoWrite);
@@ -814,8 +949,6 @@ modifiedPageWriter()
         }
 
         PRINT("[modifiedPageWriter] Page has since been modified, clearing PF space\n");
-
-        ctrs[3]++;
         
         return TRUE;
     }
@@ -894,7 +1027,6 @@ modifiedPageThread(HANDLE terminationHandle)
 BOOLEAN
 faultAndAccessTest()
 {
-    
 
     PVOID testVA;
     BOOLEAN bRes;
@@ -990,15 +1122,8 @@ faultAndAccessTest()
 
     for (int i = 0; i < virtualMemPages; i++) {
 
-
-        #ifdef CHECK_PAGEFILE
-        // "leaks" pages in order to force standby->pf repurposing
-        for (int j = 0; j < 3; j++) {
-            getPage(FALSE);
-        }
-        #endif
-
-        faultStatus testStatus = accessVA(testVA, READ_WRITE);        // to TEST VAs
+        faultStatus testStatus;
+        testStatus = accessVA(testVA, READ_WRITE);        // to TEST VAs
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
@@ -1049,7 +1174,6 @@ faultAndAccessTestThread(HANDLE terminationHandle)
 
     #else
 
-    // write out modified pages to pagefile until modified page list empty
     BOOLEAN bres;
     bres = faultAndAccessTest();
 
@@ -1092,7 +1216,6 @@ trimValidPTEs()
 
     numTrimmed = 0;
 
-    // for (currPTE; currPTE < endPTE; currPTE++ ) {
     for (int i = 0; i < PTEsInRange; i++) {
 
         if (currPTE == endPTE) {
@@ -1102,16 +1225,17 @@ trimValidPTEs()
         }
 
         //
-        // If currPTE is valid/active
+        // Acquire PTE lock and check to see if 
+        // PTE is active
         //
 
-        acquirePTELock(currPTE);        // TODO - make a copy of snap PTE and edit that indivisibly
-
+        acquirePTELock(currPTE);
 
         if (currPTE->u1.hPTE.validBit == 1) {
 
             //
-            // If aging bit remains set
+            // If aging bit remains set from previous
+            // trimming thread activity, trim PTE
             //
 
             if (currPTE->u1.hPTE.agingBit == 1) {
@@ -1144,7 +1268,7 @@ trimValidPTEs()
     }
 
     //
-    // Randomize starting PTE
+    // Randomize starting PTE using getTickCount call
     //
 
     currPTE = PTEarray;
@@ -1152,15 +1276,17 @@ trimValidPTEs()
     currPTE += (GetTickCount() % PTEsInRange);
 
     //
-    // Calculate approximate number of available pages
-    // (no listhead lock acquisition, so subject to error)
+    // Calculate number of available pages
+    // (with listhead lock acquisition)
     //
 
     numAvailablePages = 0;
     for (int i = 0; i < STANDBY + 1; i ++ ) {
+
         EnterCriticalSection(&listHeads[i].lock);
 
         numAvailablePages += listHeads[i].count;
+
     }
 
     for (int i = STANDBY; i >= 0; i--) {
@@ -1186,6 +1312,11 @@ trimValidPTEs()
 
         for (int i = 0; i < numPTEsToTrim; i++) {
 
+            //
+            // If the last PTE in the array is reached,
+            // wrap around to front of PTEarray
+            //
+
             if (currPTE == endPTE) {
 
                 currPTE = PTEarray;
@@ -1193,11 +1324,12 @@ trimValidPTEs()
             }
 
             //
-            // If currPTE is valid/active
+            // Acquire PTE lock and check if valid bit
+            // is set - if true, trim regarldess of 
+            // aging bit status
             //
 
-            acquirePTELock(currPTE);        // TODO - make a copy of snap PTE and edit that indivisibly
-
+            acquirePTELock(currPTE);
 
             if (currPTE->u1.hPTE.validBit == 1) {
 
@@ -1224,9 +1356,7 @@ trimValidPTEs()
 
     }
 
-
     return numTrimmed;
-
 
 }
 

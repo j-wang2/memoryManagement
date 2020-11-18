@@ -31,15 +31,18 @@ getVAD(void* virtualAddress)
         currStartPTE = getPTE(currVAD->startVA);
 
         //
-        // Inclusive
+        // Derive inclusive endPTE from starting PTE as well
+        // as the number of pages in the VAD
         //
 
         currEndPTE = currStartPTE + currVAD->numPages - 1;
 
-        // if in a VAD
-        // if (currStartPTE <= currPTE && currPTE < currEndPTE) {
-        if (currStartPTE <= currPTE && currPTE <= currEndPTE) {  // TODO
+        //
+        // If the current PTE is greater than the startPTE and less than the 
+        // end PTE of the VAD, return pointer to the VAD
+        //
 
+        if (currStartPTE <= currPTE && currPTE <= currEndPTE) {  // TODO
 
             return currVAD;
             
