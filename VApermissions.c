@@ -122,7 +122,6 @@ writeVA(PVOID virtualAddress, PVOID str)
 
     // todo - cannot get page_state_change once fixed in pf handler
 
-
     while (PFstatus == SUCCESS || PFstatus == PAGE_STATE_CHANGE ) {
 
         _try {
@@ -199,7 +198,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
     if (startPTE == NULL) {
 
-        PRINT_ERROR("[commitVA] Starting address does not correspond to a valid PTE\n");
+        PRINT("[commitVA] Starting address does not correspond to a valid PTE\n");
         return FALSE;
 
     }
@@ -208,7 +207,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
     if (endPTE == NULL) {
 
-        PRINT_ERROR("[commitVA] Ending address does not correspond to a valid PTE\n");
+        PRINT("[commitVA] Ending address does not correspond to a valid PTE\n");
         return FALSE;
 
     }
@@ -249,13 +248,10 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
     commitNum = currVAD->numPages - (startPTE - VADStartPTE);
 
-    // numPages + (startPTE - VADstartPTE) < currVAD->numPages
-    // 1 + 4 < 5
-
     if (commitNum < numPages) {
 
         LeaveCriticalSection(&VADListHead.lock);
-        PRINT_ERROR("[commitVA] Requested commit does not fall within a single VAD\n");
+        PRINT("[commitVA] Requested commit does not fall within a single VAD\n");
         return FALSE;
 
     }
@@ -318,7 +314,9 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         if (bRes == FALSE) {
 
             LeaveCriticalSection(&VADListHead.lock);
-            PRINT_ERROR("[commitVA] Insufficient commit charge\n");
+
+            PRINT("[commitVA] Insufficient commit charge\n");
+            
             return FALSE;
             
         }
@@ -603,7 +601,7 @@ trimPTE(PPTE PTEaddress)
     // setting status bits to modified.
     //
 
-    if (PFNtoTrim->writeInProgressBit == 1) {
+    if (PFNtoTrim->writeInProgressBit == 1 || PFNtoTrim->readInProgressBit == 1) {       // TODO - must be updated to include read in progress/refcount info
 
         if (oldPTE.u1.hPTE.dirtyBit == 0) {
 
@@ -640,6 +638,7 @@ trimPTE(PPTE PTEaddress)
                 clearPFBitIndex(PFNtoTrim->pageFileOffset);
 
                 PFNtoTrim->pageFileOffset = INVALID_BITARRAY_INDEX;
+                
             }
 
             //
@@ -883,7 +882,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
     if (currVAD == NULL) {
 
         LeaveCriticalSection(&VADListHead.lock);
-        PRINT_ALWAYS("[commitVA] Requested decommit startVA does not fall within a VAD\n");
+        PRINT("[commitVA] Requested decommit startVA does not fall within a VAD\n");
         return FALSE;
 
     }
@@ -982,6 +981,8 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
             BOOL bResult;
             bResult = MapUserPhysicalPages(currVA, 1, NULL);
 
+
+            // TODO - can this happen when 2x VAs are mapped?
             if (bResult != TRUE) {
 
                 PRINT_ERROR("[decommitVA] unable to decommit VA %llx - MapUserPhysical call failed\n", (ULONG_PTR) currVA);
@@ -1068,10 +1069,17 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
             }
             else {
 
-                // dequeue from standby/modified list
+                //
+                // Dequeue page from standby/modified list
+                //
+
                 dequeueSpecificPage(currPFN);
 
-                // if the PFN contents are also stored in pageFile
+                //
+                // If the PFN contents are also stored in pageFile, clear PF space
+                // and pagefile offset field in PFN
+                //
+
                 if (currPFN->pageFileOffset != INVALID_BITARRAY_INDEX ) {
 
                     clearPFBitIndex(currPFN->pageFileOffset);
@@ -1080,7 +1088,10 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
                     
                 }
 
-                // enqueue Page to free list (setting status bits in process)
+                //
+                // Enqueue page to free list (setting status bits in process)
+                //
+
                 enqueuePage(&freeListHead, currPFN);
 
             }      

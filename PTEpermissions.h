@@ -1,13 +1,53 @@
 #ifndef PTEPERMISSIONS_H
 #define PTEPERMISSIONS_H
 
-// #include "userMode-AWE-pageFile.h"
+#include "userMode-AWE-pageFile.h"
 
 
+#ifdef PTE_CHANGE_LOG
+
+#define LOG_ARRAY_SIZE 0x4000
+
+typedef struct _PTETrace {
+
+    PPTE dest;
+    PTE oldPTE;
+    PTE newPTE;
+
+    ULONG64 padding;
+    PFNdata PFN;
+
+    PVOID stackTrace[4];
+
+} PTETrace, *PPTETrace;
+
+
+// PTEHistoryLog - array of PTETrace's used for debugging purposes
+PTETrace PTEHistoryLog[LOG_ARRAY_SIZE];
+
+// current index in the log
+LONG currLogIndex; 
+
+/*
+ * logEntry: function to log PTE/PFN/etc data to PTEHistoryLog
+ *  - only called if PTE_CHANGE_LOG is defined
+ * 
+ * No return value
+ */
 VOID
 logEntry(PPTE dest, PTE oldValue, PTE newValue, PPFNdata currPage);
 
 
+#endif
+
+
+/*
+ * writePTE: function to write PTE value to destination PTE pointer
+ *  - if PTE_CHANGE_LOG is defined, also logs data to PTEHistoryLog
+ *    for debugging purposes
+ * 
+ * No return value 
+ */
 VOID
 writePTE(PPTE dest, PTE value);
 

@@ -3,9 +3,9 @@
 
 #define BITS_PER_FRAME 64
 
-
+#ifdef BITARRAY_TESTING
 ULONG_PTR testArray[5];
-
+#endif
 
 ULONG_PTR
 reserveBitRange(ULONG_PTR bits, PULONG_PTR bitArray, ULONG_PTR bitArraySize)
@@ -128,23 +128,30 @@ VOID
 setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_PTR bitArray)
 {
 
-    // keeps track of byte increments (i.e. "bytes place")
     ULONG_PTR i;
-
-    // keeps track of bit increments (i.e. "bits place")
     ULONG_PTR j;
-
-    // keeps track of current frame
     ULONG_PTR currFrame;
 
+    //
+    // i variable keeps track of byte increments (i.e. "bytes place")
+    //
+
     i = startBitIndex / (sizeof(ULONG_PTR) * 8);
+
+    //
+    // j variable keeps track of bit increments (i.e. "bits place")
+    // 
+
     j = startBitIndex % (sizeof(ULONG_PTR) * 8);
 
     if (j != 0) {
 
         for (ULONG_PTR l = j; numPages != 0 && l < BITS_PER_FRAME; l++) {
-
+            
+            //
             // Reset currFrame to ULONG_PTR alignment
+            //
+
             currFrame = bitArray[i];
 
             if (isSet) {
@@ -176,8 +183,11 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
         for ( i = i; i < numPages/64; i++) {
 
             if (isSet) {
+
                 bitArray[i] = MAXULONG_PTR;
+
             } else {
+
                 bitArray[i] = 0;
 
             }
@@ -190,7 +200,10 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
 
     for (int n = 0; n < numPages; n++) {
 
+        //
         // Reset currFrame to ULONG_PTR alignment
+        //
+
         currFrame = bitArray[i];
 
 
@@ -201,7 +214,10 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
             currFrame &= ~((ULONG_PTR)1 << n);
         }
 
-        // set the frame in the bitarray to the newly edited frame
+        //
+        // Set the frame in the bitarray to the newly edited frame
+        //
+
         bitArray[i] = currFrame;
 
     }
@@ -215,14 +231,15 @@ printArray(PULONG_PTR bitArray, ULONG_PTR length)
 {
 
     for (int i = 0; i < length; i++) {
-        printf("%llx | ", bitArray[i]);       // should be 1f
+        printf("%llx | ", bitArray[i]);
 
     }
     printf("\n");
 }
 
 
-#if 0 
+#ifdef BITARRAY_TESTING
+
 VOID
 main()
 {

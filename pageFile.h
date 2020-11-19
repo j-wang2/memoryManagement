@@ -15,10 +15,26 @@ ULONG_PTR
 setPFBitIndex();
 
 
+/*
+ * setPFDebugIndex: debugging alternative to setPFBitIndex
+ *  - if PAGEFILE_PFN_CHECK is enabled, logs additional data
+ *    within a larger pagefile array (containing pageFileDebug 
+ *    structs)
+ * 
+ * Returns ULONG_PTR:
+ *  - bitIndex on success
+ *  - INVALID_BITARRAY_INDEX on failure (no available space)
+ */
+ULONG_PTR
+setPFDebugIndex();
+
+
 /* 
  * clearPFBitIndex: function to clear (change from 1 to 0) bit index of pageFile bit array
  *  - denotes that PF offset is clear and can be used
  *  - if called with INVALID_BITARRAY_INDEX, simply returns
+ *  - if PAGEFILE_PFN_CHECK is enabled, follows a different path but same function
+ *    and purpose
  * 
  * No return value 
  */

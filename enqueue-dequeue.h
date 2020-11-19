@@ -8,7 +8,7 @@
 /*
  * checkAvailablePages: function to check and maintain available pages
  *  - if page dequeued is on zero/free/standby, checks total # of pages on zero/free/standby lists
- *  - if total # < 10, runs modifiedPageWriter
+ *  - if total # < MIN_AVAILABLE_PAGES, runs modifiedPageWriter
  * 
  * No return value 
  */
@@ -33,11 +33,21 @@ enqueue(PLIST_ENTRY listHead, PLIST_ENTRY newItem);
  *
  * Returns BOOLEAN
  *  - TRUE if we need to run modified writer
- *  - false if not
+ *  - FALSE if not
  */
 BOOLEAN
 enqueuePage(PlistData listHead, PPFNdata PFN);
 
+/*
+ * enqueuePageBasic: simplified version of enqueuePage above
+ *  - only used if PAGEFILE_PFN_CHECK is enabled
+ *  - bypasses pagefile page checking done by enqueuePage
+ * 
+ * Returns BOOLEAN
+ *  - TRUE if modified writer must be run
+ *  - FALSE if not
+ * 
+ */
 BOOLEAN
 enqueuePageBasic(PlistData listHead, PPFNdata PFN);
 
@@ -165,6 +175,9 @@ enqueueVA(PlistData listHead, PVANode VANode);
  * dequeueEvent: wrapper function for dequeue
  *  - dequeues an event node from listhead
  *  - decrements count of event list
+ * 
+ * Returns PeventNode:
+ *  - eventnode
  */
 PeventNode
 dequeueEvent(PlistData listHead);

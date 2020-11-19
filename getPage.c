@@ -13,24 +13,10 @@ getZeroPage(BOOLEAN returnLocked)
         returnPFN = dequeueLockedPage(&zeroListHead, returnLocked);
 
         if (returnPFN == NULL) {
+
             PRINT("[getPage] zero list empty\n");
             return NULL;
-        }
-
-        while (returnPFN->refCount != 0) {      // TODO - miscounts real available pages count
-
-            enqueuePage(&zeroListHead, returnPFN);
-
-            releaseJLock(&returnPFN->lockBits);
-
-            returnPFN = dequeueLockedPage(&zeroListHead, TRUE);
             
-            if (returnPFN == NULL) {
-
-                PRINT("[getPage] zero list empty\n");
-                return NULL;
-
-            } 
         }
 
         returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
@@ -56,24 +42,16 @@ getFreePage(BOOLEAN returnLocked)
         returnPFN = dequeueLockedPage(&freeListHead, returnLocked);
 
         if (returnPFN == NULL) {
+
             PRINT("[getPage] free list empty\n");
             return NULL;
+
         }
 
-        while (returnPFN->refCount != 0) {      // TODO - miscounts real available pages count
+        //
+        // Set PF offset to our "null" value in the PFN metadata
+        //
 
-            enqueuePage(&freeListHead, returnPFN);
-
-            releaseJLock(&returnPFN->lockBits);
-
-            returnPFN = dequeueLockedPage(&freeListHead, TRUE);
-            if (returnPFN == NULL) {
-                PRINT("[getPage] free list empty\n");
-                return NULL;
-            } 
-        }
-
-        // set PF offset to our "null" value in the PFN metadata
         returnPFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         return returnPFN;
@@ -110,22 +88,11 @@ getStandbyPage(BOOLEAN returnLocked)
         returnPFN = dequeueLockedPageFromTail(&standbyListHead, TRUE);
 
         if (returnPFN == NULL) {
+
             PRINT("[getPage] standby list empty\n");
             return NULL;
+
         } 
-
-        while (returnPFN->refCount != 0) {      // TODO - miscounts real available pages count
-
-            enqueuePage(&standbyListHead, returnPFN);
-
-            releaseJLock(&returnPFN->lockBits);
-
-            returnPFN = dequeueLockedPageFromTail(&standbyListHead, TRUE);
-            if (returnPFN == NULL) {
-                PRINT("[getPage] standby list empty\n");
-                return NULL;
-            } 
-        }
 
         //
         // Derive currPTE pointer (page lock, NOT PTE lock, is held)
