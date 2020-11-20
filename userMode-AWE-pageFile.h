@@ -12,6 +12,8 @@
 
 
 /******** Key functionality macros ********/
+
+#define MULTITHREADING
 #define NUM_THREADS 5
 #define MULTIPLE_MAPPINGS                           // enables multiple mappings
 
@@ -20,7 +22,7 @@
 #define CHECK_PFNS
 // #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing
                                                 // program to run sans pagefile
-// #define PTE_CHANGE_LOG
+#define PTE_CHANGE_LOG
 #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
                                                 // for the pagefile that includes additional information
 #define VERIFY_ADDRESS_SIGNATURES
@@ -36,7 +38,6 @@
 // #define NUM_PAGES 64
 #define NUM_PAGES 512
 // #define NUM_PAGES 2048
-// #define NUM_PAGES 64000
 
 #define MIN_AVAILABLE_PAGES 100
 
@@ -158,9 +159,6 @@ typedef struct _VANode {
 
 
 
-
-
-
 /*********** ENUM definitions ************/
 typedef enum {          // DO NOT EDIT ORDER without checking enqueue/dequeue
     ZERO,               // 0
@@ -194,6 +192,21 @@ typedef enum {
     READ,               // 0
     WRITE,              // 1
 } readWrite;
+
+typedef enum {
+    // acquired first
+    PTE_LOCK,
+
+    VAD_LOCK,       // pte lock acquired first
+
+    PAGE_LOCK,
+
+    LIST_LOCK,
+
+    PAGEFILE_LOCK,
+
+
+} lockOrder;
 
 
 
@@ -262,14 +275,11 @@ extern ULONG_PTR virtualMemPages;
 
 extern CRITICAL_SECTION pageFileLock;
 
+extern CRITICAL_SECTION VADWriteLock;
 
 
 
-// toggle multithreading on and off
-#define MULTITHREADING
-
-
-
+// TODO
 // /*****************************************************************
 
 //     * ADAPTED FROM https://docs.microsoft.com/en-us/windows/win32/memory/awe-example *

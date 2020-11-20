@@ -32,6 +32,14 @@ BOOL
 tryAcquireJLock(volatile PLONG lock);
 
 
+VOID
+acquireJCritical(PCRITICAL_SECTION cs);
+
+
+VOID
+releaseJCritical(PCRITICAL_SECTION cs);
+
+
 /*
  * initPTELocks: function to initialize PTE locks
  *  - VirtualAllocs and initializes virtual sections for assigns PTELockArray global

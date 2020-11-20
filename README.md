@@ -13,3 +13,6 @@ This usermode virtual memory system incorporates key features of its kernel mode
 * Physical memory management (by way of AWE)
 * Page table hierarchies
 * Multithreading and synchronization (page trimming/zeroing thread) 
+
+
+Note: Page trading is currently deprecated (not updated with rest of code base)

@@ -3,6 +3,8 @@
 #include "jlock.h"
 #include "userMode-AWE-pageFile.h"
 
+
+
 VOID
 acquireJLock(volatile PLONG lock)
 {
@@ -33,6 +35,22 @@ tryAcquireJLock(volatile PLONG lock)
         return FALSE;
     }
 }
+
+
+VOID
+acquireJCritical(PCRITICAL_SECTION cs)
+{
+    EnterCriticalSection(cs);
+}
+
+
+VOID
+releaseJCritical(PCRITICAL_SECTION cs)
+{
+    LeaveCriticalSection(cs);
+
+}
+
 
 
 VOID

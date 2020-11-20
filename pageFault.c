@@ -220,9 +220,8 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         // to event list.
         //
 
-        if (transitionPFN->refCount == 0) {   // todo - change to non interlocked decrement and add refcount PFN
-                    // needs to be fixed so that any enqueue to list checks this so there isnt a repurpose without ccheckig read in rpog bit
-            
+        if (transitionPFN->refCount == 0) {   
+
             transitionPFN->readInProgEventNode = NULL;
 
             enqueueEvent(&readInProgEventListHead, currEventNode);
@@ -387,6 +386,25 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     }
 
     //
+    // Create a read in progress event for a prospective faulter/decommitter/pagetrader to wait on.
+    // Acquired pre-page lock acquisition to avoid waiting while holding page lock (although PTE lock
+    // remains held, which could be improved in future optimizations)
+    //
+
+    PeventNode readInProgEventNode;
+    readInProgEventNode = dequeueLockedEvent(&readInProgEventListHead);
+
+    while (readInProgEventNode == NULL) {
+
+        PRINT("failed to get event handle\n");
+
+        WaitForSingleObject(readInProgEventListHead.newPagesEvent, INFINITE);
+
+        readInProgEventNode = dequeueLockedEvent(&readInProgEventListHead);
+
+    }
+
+    //
     // dequeue a page of memory from freed list
     //
 
@@ -401,6 +419,8 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         // release of PTE lock
         //
 
+        enqueueEvent(&readInProgEventListHead, readInProgEventNode);
+
         return NO_AVAILABLE_PAGES;
 
     }        
@@ -414,23 +434,6 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     freedPFN->statusBits = STANDBY;
 
     freedPFN->readInProgressBit = 1;
-
-    //
-    // Create a read in progress event for a prospective faulter/decommitter/pagetrader to wait on
-    //
-
-    PeventNode readInProgEventNode;
-    readInProgEventNode = dequeueLockedEvent(&readInProgEventListHead);
-
-    while (readInProgEventNode == NULL) {
-
-        PRINT_ERROR("failed to get event handle\n");
-
-        WaitForSingleObject(readInProgEventListHead.newPagesEvent, INFINITE);
-
-        readInProgEventNode = dequeueLockedEvent(&readInProgEventListHead);
-
-    }
 
     freedPFN->readInProgEventNode = readInProgEventNode;
 
@@ -690,12 +693,10 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
         enqueueEvent(&readInProgEventListHead, readInProgEventNode);
 
-        // TODO - enqueue to list?
-
     }
 
     //
-    // Vefore PFN lock is released, check clearIndex flag in order to 
+    // Before PFN lock is released, check clearIndex flag in order to 
     // decide whether pageFileOffset field must be cleared from PFN
     //
 
@@ -732,7 +733,10 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
     newPTE.u1.ulongPTE = 0;
 
-    // check permissions
+    //
+    // Verify requested (RWE) permissions against PTE permissions
+    //
+
     dZeroRWEpermissions = snapPTE.u1.dzPTE.permissions;
 
     if (!checkPTEpermissions(dZeroRWEpermissions, RWEpermissions)) {
@@ -741,10 +745,13 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
         return ACCESS_VIOLATION;
 
     } 
-    // if write, set dirty bit 
-    else if (permissionMasks[RWEpermissions] & writeMask) {
 
-        // set PTE to dirty
+    //
+    // If permissions requested are write, set dirty bit 
+    //
+
+    if (permissionMasks[RWEpermissions] & writeMask) {
+
         newPTE.u1.hPTE.dirtyBit = 1;
 
     }
@@ -774,24 +781,30 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
 
     }   
 
-    // set PFN status to active
+    //
+    // Set PFN status to active and PTE index field within PFN
+    //
+
     freedPFN->statusBits = ACTIVE;
 
-    // set PFN PTE index
     freedPFN->PTEindex = PTEindex;
 
-    // RELEASE pfn lock so that it can now be viewed/modified by other threads
+    //
+    // Release pfn lock so that it can now be viewed/modified by other threads
+    //
+
     releaseJLock(&freedPFN->lockBits);
 
     //
-    // calculate PFN index and assign in PTE field
+    // Calculate PFN index and assign in PTE field
     //
 
     pageNum = freedPFN - PFNarray;
+
     newPTE.u1.hPTE.PFN = pageNum;
 
     //
-    // change PTE to valid (setting valid bit)
+    // Change PTE state to valid (setting valid bit)
     // 
 
     newPTE.u1.hPTE.validBit = 1;
@@ -803,7 +816,7 @@ demandZeroPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE sna
     newPTE.u1.hPTE.agingBit = 0;
 
     //
-    // copy permissions from demand zero PTE into our soon-to-be-active PTE
+    // Copy permissions from demand zero PTE into our soon-to-be-active PTE
     //
 
     transferPTEpermissions(&newPTE, dZeroRWEpermissions);
@@ -851,24 +864,49 @@ faultStatus
 checkVADPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 {
 
+    PVADNode currVAD;
+    PTEpermissions VADpermissions;
+    faultStatus dzStatus;
+
     ASSERT(masterPTE->u1.dzPTE.decommitBit == 0);
 
-    PVADNode currVAD;
+    //
+    // Get VAD "write" lock (acquiring the other VAD lock causes
+    // AB-BA deadlock issue with PTE lock, since PTE lock is acquired 
+    // AFTER VAD "read" lock in commit/decommit)
+    //
+
+    EnterCriticalSection(&VADWriteLock);
+
     currVAD = getVAD(virtualAddress);
 
-    if (currVAD == NULL || currVAD->commitBit == 0) {
-        PRINT ("not in VAD\n");
+    if (currVAD == NULL || currVAD->commitBit == 0 || currVAD->deleteBit) {
+
+        LeaveCriticalSection(&VADWriteLock);
+
+        PRINT("[checkVADPageFault] VA does not correspond to a VAD\n");
+
         return ACCESS_VIOLATION;
+
     }
+    
+    //
+    // Release lock during duration of demand zero fault
+    //
 
+    LeaveCriticalSection(&VADWriteLock);
 
-    // get permissions from the VAD
-    PTEpermissions VADpermissions;
+    //
+    // Get permissions from the VAD and insert into new "demand zero" PTE
+    //
+
     VADpermissions = currVAD->permissions;
 
     snapPTE.u1.dzPTE.permissions = VADpermissions;
 
-    return demandZeroPageFault(virtualAddress, RWEpermissions, snapPTE, masterPTE);
+    dzStatus = demandZeroPageFault(virtualAddress, RWEpermissions, snapPTE, masterPTE);
+
+    return dzStatus;
 
 }
 
@@ -885,13 +923,13 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     PRINT("[pageFault]");
 
     //
-    // get the PTE from the VA
+    // Get the current PTE from the VA param
     //
 
     currPTE = getPTE(virtualAddress);
 
     //
-    // invalid VA (not in range)
+    // Check for invalid VA (not in range)
     //
 
     if (currPTE == NULL) {
@@ -902,13 +940,13 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     }
 
     //
-    // Accquire PTE lock (held through all save pf pagefault)
+    // Acquire PTE lock (held through all save pf pagefault)
     //
 
     acquirePTELock(currPTE);
 
     //
-    // make a shallow copy/"snapshot" of the PTE to edit and check
+    // Make a shallow copy/"snapshot" of the PTE to edit and check
     //
 
     oldPTE = *currPTE;
@@ -938,7 +976,7 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
              oldPTE.u1.pfPTE.pageFileIndex != INVALID_BITARRAY_INDEX) { 
 
         //
-        // Note: PTE lock released pre-filesystem read and re-acquired post read
+        // Note: PTE is not held through - instead, it is released pre-filesystem read and re-acquired post read
         //
 
         status = pageFilePageFault(virtualAddress, RWEpermissions, oldPTE, currPTE);  

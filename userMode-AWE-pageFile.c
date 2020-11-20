@@ -54,6 +54,7 @@ listData readInProgEventListHead;       // list of events
 /********** Locks ************/
 PCRITICAL_SECTION PTELockArray;
 CRITICAL_SECTION pageFileLock;
+CRITICAL_SECTION VADWriteLock;
 
 HANDLE physicalPageHandle;              // for multi-mapped pages (to support multithreading)
 
@@ -184,14 +185,14 @@ initVABlock(ULONG_PTR numPages)
 
     }
 
-    // Does not need to be checked for overflow since VirtualAlloc will not return a value
+    // Does not need to be checked for overflow since Virtual Alloc will not return a value
     leafVABlockEnd = (PVOID) ( (ULONG_PTR)leafVABlock + ( numPages << PAGE_SHIFT ) );   // equiv to numPages*PAGE_SIZE
 
 }
 
 
 VOID
-initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
+initPFNarray(PULONG_PTR arrayPFNs, ULONG_PTR numPages)
 {
 
     PVOID commitCheckVA; 
@@ -204,7 +205,7 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
     maxPFN = 0;
 
     //
-    // Loop through aPFNs array (from AllocateUserPhysicalPages) to find largest numerical PFN
+    // Loop through arrayPFNs (from AllocateUserPhysicalPages) to find largest numerical PFN
     //
 
     for (int i = 0; i < numPages; i++) {
@@ -213,16 +214,16 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
         // If current PFN is larger than current maximum, replace
         //
 
-        if (maxPFN < aPFNs[i]) {
+        if (maxPFN < arrayPFNs[i]) {
 
-            maxPFN = aPFNs[i];
+            maxPFN = arrayPFNs[i];
 
         }
 
     }
 
     //
-    // VirtualAlloc (with MEM_RESERVE) PFN metadata array
+    // Virtual Alloc (with MEM_RESERVE) PFN metadata array
     //
 
     PFNarray = VirtualAlloc(NULL, (maxPFN+1)*(sizeof(PFNdata)), MEM_RESERVE, PAGE_READWRITE);
@@ -239,14 +240,23 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
     //
 
     for (int i = 0; i < numPages; i++) {
+
         PPFNdata newPFN;
-        newPFN = PFNarray + aPFNs[i];
+
+        newPFN = PFNarray + arrayPFNs[i];
+        
+        //
+        // Since these are merely committed sections of the larger PFNarray,
+        // it is freed singularly when the PFNarray itself is freed.
+        //
 
         commitCheckVA = VirtualAlloc(newPFN, sizeof (PFNdata), MEM_COMMIT, PAGE_READWRITE);
         
         if (commitCheckVA == NULL) {
+
             PRINT_ERROR("failed to commit subsection of PFN array at PFN %d\n", i);
             exit(-1);
+
         }
 
 
@@ -280,9 +290,9 @@ initPFNarray(PULONG_PTR aPFNs, ULONG_PTR numPages)
 VOID
 initPTEarray(ULONG_PTR numPages)
 {    
-    
+
     //
-    // VirtualAlloc (with MEM_RESERVE | MEM_COMMIT) for PTE array
+    // Virtual Alloc (with MEM_RESERVE | MEM_COMMIT) for PTE array
     //
 
     PTEarray = VirtualAlloc(NULL, numPages*(sizeof(PTE)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -302,7 +312,7 @@ initPageFile(ULONG_PTR diskSize)
 {
 
     //
-    // VirtualAlloc (with MEM_RESERVE | MEM_COMMIT) for pageFileVABlock
+    // Virtual Alloc (with MEM_RESERVE | MEM_COMMIT) for pageFileVABlock
     //
 
     pageFileVABlock = VirtualAlloc(NULL, diskSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -330,7 +340,7 @@ initPageFile(ULONG_PTR diskSize)
 
 
 ULONG_PTR
-allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs) 
+allocatePhysPages(ULONG_PTR numPages, PULONG_PTR arrayPFNs) 
 {
 
     BOOL bResult;
@@ -386,7 +396,7 @@ allocatePhysPages(ULONG_PTR numPages, PULONG_PTR aPFNs)
 
     #endif
 
-    bResult = AllocateUserPhysicalPages(physicalPageHandle, &numPagesAllocated, aPFNs);
+    bResult = AllocateUserPhysicalPages(physicalPageHandle, &numPagesAllocated, arrayPFNs);
 
     if (bResult != TRUE) {
 
@@ -716,7 +726,7 @@ releaseAwaitingFreePFN(PPFNdata PFNtoFree)
     // Verify page lock is held
     //
 
-    ASSERT(PFNtoFree->lockBits == 1);
+    ASSERT(PFNtoFree->lockBits != 0);
         
     //
     // Clear index in pagefile, pagefile offset field in PFN,
@@ -1034,12 +1044,19 @@ faultAndAccessTest()
 
     PRINT_ALWAYS("Fault and access test\n");
 
+    // ULONG_PTR vadSize = virtualMemPages;
+    ULONG_PTR vadSize = 512;
+    
+    createVAD(NULL, vadSize, READ_WRITE, TRUE);         // MEM_COMMIT vad (todo)
+    // createVAD(NULL, vadSize, READ_WRITE, FALSE);        // MEM_RESERVE vad (todo)
+
     /************** TESTING *****************/
     testVA = leafVABlock;
 
 
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
+    // TODO
 
     // bRes = commitVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);     // commits with READ_ONLY permissions
     // protectVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);   // converts to read write
@@ -1077,7 +1094,10 @@ faultAndAccessTest()
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
 
+        //
         // iterate to next VA
+        //
+        
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
 
     }
@@ -1136,6 +1156,8 @@ faultAndAccessTest()
     // bRes = decommitVA(testVA, virtualMemPages << PAGE_SHIFT);        // todo
     bRes = decommitVA(testVA, 512 << PAGE_SHIFT);       // todo
 
+    deleteVAD(leafVABlock);
+
     return TRUE;
 
 }
@@ -1148,26 +1170,38 @@ faultAndAccessTestThread(HANDLE terminationHandle)
     #ifdef CONTINUOUS_FAULT_TEST
 
     while (TRUE) {
-        
-        // write out modified pages to pagefile until modified page list empty
+
         BOOLEAN bres;
+        DWORD waitRes;
+
+        //
+        // Continuously fault and access addresses until
+        // terminate handle is set
+        //
+
         bres = faultAndAccessTest();
 
-
-        DWORD waitRes;
         waitRes = WaitForSingleObject(terminationHandle, 100);
 
         if (waitRes == WAIT_TIMEOUT) {
+
             continue;
+
         }
         else if (waitRes == WAIT_OBJECT_0) {
+
             PRINT_ALWAYS("faultAndAccessTest thread exiting\n");
             return 0;
+
         } else if (waitRes == WAIT_ABANDONED) {
+
             PRINT_ERROR("wait abandoned\n");
 
+
         } else if (waitRes == WAIT_FAILED) {
+
             PRINT_ERROR("wait failed\n");
+
         }
 
     }
@@ -1418,7 +1452,6 @@ DWORD WINAPI
 checkPageStatusThread(HANDLE terminationHandle) 
 {
 
-
     while (TRUE) {
 
         if (checkPages) {
@@ -1470,7 +1503,6 @@ checkPageStatusThread(HANDLE terminationHandle)
                     secondCurr = pageFileDebugArray + l;
 
                     secondCurrPFN = secondCurr->currPFN;
-
 
                     ASSERT (memcmp(PFN, secondCurrPFN, sizeof(PFNdata) != 0) );
                 }
@@ -1530,21 +1562,33 @@ VOID
 initListHead(PlistData headData)
 {
 
-    // initialize lock field
-    InitializeCriticalSection(&(headData->lock));
+    HANDLE pagesCreatedHandle;
 
-    // initialize head
-    initLinkHead(&(headData->head));
+    //
+    // Initialize lock field (as a CRITICAL_SECTION)
+    //
 
-    // initialize count
+    InitializeCriticalSection(&headData->lock);
+
+    //
+    // Initialize head links
+    //
+
+    initLinkHead(&headData->head);
+
+    //
+    // Initialize item count to zero
+    //
+
     headData->count = 0;
 
-    HANDLE pagesCreatedHandle;
     pagesCreatedHandle = CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (pagesCreatedHandle == INVALID_HANDLE_VALUE) {
+
         PRINT_ERROR("failed to create event handle\n");
         exit(-1);
+
     }
 
     headData->newPagesEvent = pagesCreatedHandle;
@@ -1567,6 +1611,12 @@ VOID
 initVAList(PlistData VAListHead, ULONG_PTR numVAs)
 {
 
+    PVANode baseNode;
+    PVANode currNode;
+    PVOID baseVA;
+
+
+
     if (numVAs < 1) {
         PRINT_ERROR("[initVAList] Cannot initialize list of VAs with length 0\n");
         exit (-1);
@@ -1576,49 +1626,61 @@ initVAList(PlistData VAListHead, ULONG_PTR numVAs)
     initListHead(VAListHead);
 
     //
-    // Call VirtualAlloc for VAs
+    // Call Virtual Alloc for a block of VAs, which is then subdivided
     //
-
-    void* baseVA;
 
     #ifdef MULTIPLE_MAPPINGS
 
-    MEM_EXTENDED_PARAMETER extendedParameters = {0};
+        MEM_EXTENDED_PARAMETER extendedParameters = {0};
+        
+        extendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
 
-    
-    extendedParameters.Type = MemExtendedParameterUserPhysicalHandle;
-    extendedParameters.Handle = physicalPageHandle;
+        extendedParameters.Handle = physicalPageHandle;
 
-    baseVA = VirtualAlloc2(NULL, NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &extendedParameters, 1);      // equiv to numVAs*PAGE_SIZE
+        baseVA = VirtualAlloc2(NULL, NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &extendedParameters, 1);      // equiv to numVAs*PAGE_SIZE
 
     #else
 
-    baseVA = VirtualAlloc(NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);      // equiv to numVAs*PAGE_SIZE
+        baseVA = VirtualAlloc(NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);      // equiv to numVAs*PAGE_SIZE
 
     #endif
 
+    //
+    // Allocate for VA-encompassing node structures
+    //
 
-    // alloc for nodes
-    PVANode baseNode;
     baseNode = VirtualAlloc(NULL, numVAs * sizeof(VANode), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
-    PVANode currNode;
     void* currVA;
 
+    //
     // for each VA, allocate memory and link onto head
+    //
 
     for (int i = 0; i < numVAs; i++) {
 
-        //get address of current node
+        //
+        // Get address of current node by indexing relative to 
+        // base node address
+        //
+
         currNode = baseNode + i;
 
-        // get address of current address
+        //
+        // Get virtual address to be inserted into node by indexing
+        // into previously allocated block (baseVA)
+        //
+
         currVA = (void*) ( (ULONG_PTR)baseVA + ( i << PAGE_SHIFT ) );   // equiv to i*PAGE_SIZE
 
         currNode->VA = currVA;
 
-        // enqueue node to list
+        //
+        // Enqueue node to VA list
+        //
+
         enqueueVA(VAListHead, currNode);
+
     }
     
 }
@@ -1641,10 +1703,12 @@ freeVAList(PlistData VAListHead)
     //
 
     while (currLinks != &VAListHead->head) {
+
+        //
+        // Get node from the links field
+        //
     
         currNode = CONTAINING_RECORD(currLinks, VANode, links);
-
-        // VirtualFree(currNode->VA, 0, MEM_RELEASE);
 
         if (baseNode == NULL || (PVOID) currNode < (PVOID) baseNode) {
 
@@ -1657,6 +1721,8 @@ freeVAList(PlistData VAListHead)
         currLinks = nextLinks;
 
     }
+
+    DeleteCriticalSection(&VAListHead->lock);
 
     //
     // Free VA's from the nodes
@@ -1680,12 +1746,24 @@ initEventList(PlistData eventListHead, ULONG_PTR numEvents)
     PeventNode baseNode;
     PeventNode currNode;
 
+    //
+    // If the number of events parameter is zero, immediately return
+    // with error.
+    //
+
     if (numEvents < 1) {
+
         PRINT_ERROR("[initEventList] cannot initialize list of Events with length < 1\n");
         exit (-1);
+
     }
     
     initListHead(eventListHead);
+
+    //
+    // Allocate a block of memory which is then subdivided into 
+    // each of the event nodes.
+    //
 
     baseNode = VirtualAlloc(NULL, numEvents * sizeof(eventNode), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
@@ -1698,10 +1776,16 @@ initEventList(PlistData eventListHead, ULONG_PTR numEvents)
 
         currNode = baseNode + i;
 
+        //
+        // Create a manually-reset event in the current node.
+        //
+
         currNode->event = CreateEvent(NULL, TRUE, FALSE, NULL);
 
         if (currNode->event == INVALID_HANDLE_VALUE) {
-            PRINT_ERROR("failed to create event handle\n")
+
+            PRINT_ERROR("failed to create event handle\n");
+
         }
 
         enqueueEvent(eventListHead, currNode);
@@ -1765,25 +1849,60 @@ VOID
 initVADList()
 {
 
-    InitializeCriticalSection(&(VADListHead.lock));
+    InitializeCriticalSection(&VADWriteLock);
 
-    initLinkHead(&(VADListHead.head));
+    InitializeCriticalSection(&VADListHead.lock);
+
+    initLinkHead(&VADListHead.head);
 
     VADListHead.count = 0;
 
 }
 
+VOID
+freeVADList(PlistData listHead)
+{
+    PVADNode currNode;
+    PLIST_ENTRY currLinks;
+    PLIST_ENTRY nextLinks;
+    PVOID baseAddress;
+
+    baseAddress = NULL;
+    currLinks = listHead->head.Flink;
+
+    //
+    // Iterate through nodes to find the original base address
+    //
+
+    while (currLinks != &listHead->head) {
+    
+        BOOL bRes;
+
+        currNode = CONTAINING_RECORD(currLinks, VADNode, links);
+
+        nextLinks = currNode->links.Flink;
+
+        bRes = deleteVAD(currNode->startVA);
+
+        if (bRes != TRUE){
+
+            PRINT_ERROR("[freeVADList] Failed to delete VAD\n");
+
+        }
+
+
+        currLinks = nextLinks;
+
+    }
+
+    DeleteCriticalSection(&listHead->lock);
+
+}
 
 VOID
 testRoutine()
 {
     PRINT_ALWAYS("[testRoutine]\n");
-
-    // ULONG_PTR vadSize = virtualMemPages;
-    ULONG_PTR vadSize = 512;
-    
-    createVAD(NULL, vadSize, READ_WRITE, TRUE);         // MEM_COMMIT vad (todo)
-    // createVAD(NULL, vadSize, READ_WRITE, FALSE);        // MEM_RESERVE vad (todo)
 
     #ifdef MULTITHREADING
 
@@ -1791,33 +1910,49 @@ testRoutine()
     PRINT_ALWAYS("Creating threads\n");
 
     //
-    // Handle to terminate all threads
+    // Create event handle to signal termination of working threads
+    // (i.e. modified writer, trimmer, zeroing threads)
     //
 
     HANDLE terminateWorkingThreadsHandle;
+    
     terminateWorkingThreadsHandle =  CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (terminateWorkingThreadsHandle == INVALID_HANDLE_VALUE) {
+
         PRINT_ERROR("failed to create event handle\n");
+
     }
 
+    //
+    // Create event handle to signal termination of testing threads
+    // (must be signaled after working threads have exited to avoid
+    // deadlock)
+    //
+
     HANDLE terminateTestingThreadsHandle;
+
     terminateTestingThreadsHandle =  CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (terminateTestingThreadsHandle == INVALID_HANDLE_VALUE) {
+
         PRINT_ERROR("failed to create event handle\n");
+
     }
 
 
     PRINT_ALWAYS(" - %d zeroPage threads\n", NUM_THREADS);
 
     HANDLE zeroPageThreadHandles[NUM_THREADS];
+
     for (int i = 0; i < NUM_THREADS; i++) {
 
         zeroPageThreadHandles[i] = CreateThread(NULL, 0, zeroPageThread, terminateWorkingThreadsHandle, 0, NULL);
             
         if (zeroPageThreadHandles[i] == INVALID_HANDLE_VALUE) {
+
             PRINT_ERROR("failed to create zeroPage handle\n");
+
         }
   
     }  
@@ -1829,12 +1964,17 @@ testRoutine()
     PRINT_ALWAYS(" - %d freePage threads\n", NUM_THREADS);
 
     HANDLE freePageTestThreadHandles[NUM_THREADS];
+
     for (int i = 0; i < NUM_THREADS; i++) {
+
         freePageTestThreadHandles[i] = CreateThread(NULL, 0, freePageTestThread, terminateWorkingThreadsHandle, 0, NULL);
 
         if (freePageTestThreadHandles[i] == INVALID_HANDLE_VALUE) {
+
             PRINT_ERROR("failed to create freePage handle\n");
+
         }
+
     }
     #endif
 
@@ -1848,7 +1988,9 @@ testRoutine()
         modifiedPageWriterThreadHandles[i] = CreateThread(NULL, 0, modifiedPageThread, terminateWorkingThreadsHandle, 0, NULL);
             
         if (modifiedPageWriterThreadHandles[i] == INVALID_HANDLE_VALUE) {
+
             PRINT_ERROR("failed to create modifiedPageWriting handle\n");
+
         }
   
     }
@@ -1857,12 +1999,15 @@ testRoutine()
     PRINT_ALWAYS(" - %d PTE trimming threads\n", NUM_THREADS);
 
     HANDLE trimThreadHandles[NUM_THREADS];
+
     for (int i = 0; i < NUM_THREADS; i++) {
 
         trimThreadHandles[i] = CreateThread(NULL, 0, trimValidPTEThread, terminateWorkingThreadsHandle, 0, NULL);
             
         if (trimThreadHandles[i] == INVALID_HANDLE_VALUE) {
+
             PRINT_ERROR("failed to create modifiedPageWriting handle\n");
+
         }
   
     }
@@ -1873,12 +2018,15 @@ testRoutine()
     PRINT_ALWAYS(" - %d access/fault test threads\n", NUM_THREADS);
 
     HANDLE testHandles[NUM_THREADS];
+
     for (int i = 0; i < NUM_THREADS; i++) {
 
         testHandles[i] = CreateThread(NULL, 0, faultAndAccessTestThread, terminateTestingThreadsHandle, 0, NULL);
             
         if (testHandles[i] == INVALID_HANDLE_VALUE) {
+
             PRINT_ERROR("failed to create modifiedPageWriting handle\n");
+
         }
   
     }
@@ -1889,26 +2037,38 @@ testRoutine()
     pageTestThread = CreateThread(NULL, 0, checkPageStatusThread, terminateWorkingThreadsHandle, 0 , NULL);
     #endif
 
+    //
+    // Enable keyboard input to end program (either a q or f to begin
+    // program termination)
+    //
+
     char quitChar;
+
     quitChar = 'a';
+
     while (quitChar != 'q' && quitChar != 'f') {
+
         quitChar = (char) getchar();
 
         #ifdef CHECK_PFNS
-        if (quitChar == 'b') {
-            checkPages = !checkPages;
-        }
+
+            if (quitChar == 'b') {
+
+                checkPages = !checkPages;
+
+            }
+
         #endif
+
     }
+
     PRINT_ALWAYS("qchar: %c, %d\n", quitChar, quitChar);
 
     PRINT_ALWAYS("Ending program\n");
 
-
-
-
     //
     // Testing threads MUST exit prior to working threads
+    // (inverse order runs risk of deadlock)
     //
 
     SetEvent(terminateTestingThreadsHandle);
@@ -1924,16 +2084,21 @@ testRoutine()
     WaitForMultipleObjects(NUM_THREADS, zeroPageThreadHandles, TRUE, INFINITE);
 
     #ifdef TESTING_ZERO
-    WaitForMultipleObjects(NUM_THREADS, freePageTestThreadHandles, TRUE, INFINITE);
+
+        WaitForMultipleObjects(NUM_THREADS, freePageTestThreadHandles, TRUE, INFINITE);
     
     #endif
 
     #ifdef TESTING_MODIFIED
-    WaitForMultipleObjects(NUM_THREADS, modifiedPageWriterThreadHandles, TRUE, INFINITE);
+
+        WaitForMultipleObjects(NUM_THREADS, modifiedPageWriterThreadHandles, TRUE, INFINITE);
+
     #endif
 
     #ifdef CHECK_PFNS
-    WaitForSingleObject(pageTestThread, INFINITE);
+
+        WaitForSingleObject(pageTestThread, INFINITE);
+
     #endif
 
 
@@ -1941,31 +2106,40 @@ testRoutine()
 
     #endif
 
-    deleteVAD(leafVABlock, 0);
+    //
+    // Free VAD list prior to checking PFNs on exit
+    //
+
+    freeVADList(&VADListHead);
 
     /********** Verify no PFNs remain active *********/
 
     #ifdef CHECK_PFNS
-    PPFNdata currPFN;
 
-    for (int j = 0; j < numPagesReturned; j++) {
+        PPFNdata currPFN;
 
-        currPFN = PFNarray + aPFNs[j];
+        for (int j = 0; j < numPagesReturned; j++) {
 
-        acquireJLock(&currPFN->lockBits);
-        if (currPFN->statusBits > MODIFIED) {
+            currPFN = PFNarray + aPFNs[j];
 
-            DebugBreak();
+            acquireJLock(&currPFN->lockBits);
+
+            ASSERT(currPFN->statusBits <= MODIFIED);
+
+            releaseJLock(&currPFN->lockBits);
 
         }
 
-        releaseJLock(&currPFN->lockBits);
-
-
-    }
     #endif
 
     ULONG_PTR pageCount;
+
+    //
+    // Calculate the pagecount without acquiring page locks,
+    // since program is now single threaded at this point and
+    // does not run the risk of inaccuracy as such.
+    //
+
     pageCount = 0;
 
     for (int i = 0; i < ACTIVE; i++) {
@@ -1975,7 +2149,8 @@ testRoutine()
     }
 
     PRINT_ALWAYS("total page count %llu\n", pageCount);
-    ASSERT(numPagesReturned == pageCount);  // plus one for the pagetrade???
+
+    ASSERT(numPagesReturned == pageCount);
 
 }
 
@@ -1983,18 +2158,23 @@ testRoutine()
 VOID
 initHandles()
 {
+
     wakeTrimHandle = CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (wakeTrimHandle == INVALID_HANDLE_VALUE) {
+
         PRINT_ERROR("failed to create event handle\n");
         exit(-1);
+
     }
 
     wakeModifiedWriterHandle = CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (wakeModifiedWriterHandle == INVALID_HANDLE_VALUE) {
+
         PRINT_ERROR("failed to create event handle\n");
         exit(-1);
+
     }
 }
 
@@ -2002,7 +2182,9 @@ initHandles()
 BOOL
 closeHandles()
 {
+
     BOOL bRes;
+
     bRes = CloseHandle(wakeTrimHandle);
 
     if (bRes != TRUE) {
@@ -2010,6 +2192,7 @@ closeHandles()
         PRINT_ERROR("Unable to close handle\n");
 
     }
+
     bRes = CloseHandle(wakeModifiedWriterHandle);
 
     if (bRes != TRUE) {
@@ -2031,17 +2214,40 @@ initializeVirtualMemory()
 
     #ifndef PAGEFILE_OFF
 
+        //
+        // If pagefile is on, initialize to all zeroes (regardlesss of 
+        // whether PAGEFILE_PFN_CHECK is enabled)
+        //
+
         #ifndef PAGEFILE_PFN_CHECK
 
-        // memset the pageFile bit array
+            //
+            // Initialize the pagefilebitarray to all zero (all space is clear)
+            //
+
             memset(&pageFileBitArray, 0, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );
 
         #else
+
+            //
+            // Allocate for a pagefileDebugArray that stores a pagefiledebug struct
+            // at each pagefile index and initialize it to all zero.
+            //
+
             pageFileDebugArray = VirtualAlloc(NULL, sizeof(pageFileDebug)*PAGEFILE_PAGES, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE );
+
             memset(pageFileDebugArray, 0, PAGEFILE_PAGES * sizeof(pageFileDebug ));
+
         #endif
 
     #else
+
+        //
+        // If pagefile is toggled off, memset the bitarray to all set (no space available)
+        //
+        // Note: currently PAGEFILE_OFF is not compatible with the PAGEFILE_PFN_CHECK
+        // macro, since removing the pagefile would render it moot
+        //
 
         memset(&pageFileBitArray, 1, PAGEFILE_PAGES/(8*sizeof(ULONG_PTR) ) );
     
@@ -2050,18 +2256,28 @@ initializeVirtualMemory()
     //
     // Initialize pagefile critical section
     //
+
     InitializeCriticalSection(&pageFileLock);
 
-    // allocate an array of PFNs that is returned by AllocateUserPhysPages
+    //
+    // Allocate an array of PFNs that is returned by AllocateUserPhysPages
+    //
 
     #ifndef CHECK_PFNS
 
-    //
-    // if CHECK_PFNS flag is not set, declare aPFNs locally (since it can be freed locally as well)
-    //
+        //
+        // if CHECK_PFNS flag is not set, declare aPFNs locally (since it can be freed locally as well),
+        // rather than globally
+        //
 
-    PULONG_PTR aPFNs;  
+        PULONG_PTR aPFNs;  
+
     #endif
+
+    //
+    // Regardless of whether CHECK_PFNs is check, aPFNs array is dynamically allocated
+    // to permit varied NUM_PAGES values
+    //
 
     aPFNs = VirtualAlloc(NULL, NUM_PAGES*(sizeof(ULONG_PTR)), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     
@@ -2073,11 +2289,19 @@ initializeVirtualMemory()
 
     numPagesReturned = allocatePhysPages(NUM_PAGES, aPFNs);
 
-    // to achieve a greater VM address range than PM would otherwise allow
+    //
+    // Calculate virtualMemPages, a function of numPagesReturned and pre-defined 
+    // VM_MULTIPLIER, to achieve a greater VM address range than PM would otherwise 
+    // allow
+    //
+
     virtualMemPages = numPagesReturned * VM_MULTIPLIER;
 
+    //
+    // Initialize VA lists, consisting of AWE addresses for page contents
+    // manipulation
+    //
 
-    // initialize zeroVAList, consisting of AWE addresses for zeroing pages
     initVAList(&zeroVAListHead, NUM_THREADS + 3);
 
     initVAList(&writeVAListHead, NUM_THREADS + 3);
@@ -2091,7 +2315,10 @@ initializeVirtualMemory()
 
     /******************* initialize data structures ****************/
 
-    // create virtual address block
+    //
+    // Create virtual address block
+    //
+
     initVABlock(virtualMemPages);
 
     initVADList();
@@ -2107,8 +2334,14 @@ initializeVirtualMemory()
     initPFNarray(aPFNs, numPagesReturned);
 
     #ifndef CHECK_PFNS
-    // Free PFN array (no longer used)
-    VirtualFree(aPFNs, 0, MEM_RELEASE);
+
+        //
+        // Free PFN array if CHECK_PFNs flag is cleared,
+        // since it is not used outside of this function
+        //
+
+        VirtualFree(aPFNs, 0, MEM_RELEASE);
+
     #endif
 
     // create local PTE array to map VAs to pages
@@ -2136,15 +2369,50 @@ freeVirtualMemory()
     VirtualFree(PFNarray, 0, MEM_RELEASE);
     VirtualFree(PTEarray, 0, MEM_RELEASE);
     VirtualFree(pageFileVABlock, 0, MEM_RELEASE);
+    DeleteCriticalSection(&pageFileLock);
+    VirtualFree(VADBitArray, 0, MEM_RELEASE);
+
+    //
+    // Free event list
+    //
 
     freeEventList(&readInProgEventListHead);
+
+    //
+    // Free all "scratch" VA lists
+    //
 
     freeVAList(&zeroVAListHead);
     freeVAList(&writeVAListHead);
     freeVAList(&readPFVAListHead);
     freeVAList(&pageTradeVAListHead);
 
-    // close availablePagesLow & wakeModifiedWriter handles
+    #ifdef PAGEFILE_PFN_CHECK
+    
+        //
+        // pageFileDebugArray must be freed since it is dynamically
+        // allocated, unlike static global pageFileBitArray
+        //
+
+        VirtualFree(pageFileDebugArray, 0, MEM_RELEASE);
+
+    #endif
+
+    #ifdef CHECK_PFNS
+    
+        //
+        // If aPFNs has not yet been freed (within initVirtualMemory),
+        // free it now
+        //
+
+        VirtualFree(aPFNs, 0, MEM_RELEASE);
+
+    #endif
+
+    //
+    // Close availablePagesLow & wakeModifiedWriter handles
+    //
+
     closeHandles();
 
     freePTELocks(PTELockArray, virtualMemPages);
@@ -2158,17 +2426,15 @@ main(int argc, char** argv)
 
     /*********** switch to toggle verbosity (print statements) *************/
     if (argc > 1 && strcmp(argv[1], "-v") == 0) {
+
         debugMode = TRUE;
+
     }
     
-    // ULONG_PTR numPagesReturned;
-
     numPagesReturned = initializeVirtualMemory();
-
 
     /******************** call test routine ******************/
     testRoutine();
-
 
     /******************* free allocated memory ***************/
     freeVirtualMemory();

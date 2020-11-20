@@ -853,7 +853,6 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
     endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
 
-
     endPTE = getPTE(endVA);
 
     if (endPTE == NULL) {
@@ -882,7 +881,9 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
     if (currVAD == NULL) {
 
         LeaveCriticalSection(&VADListHead.lock);
+
         PRINT("[commitVA] Requested decommit startVA does not fall within a VAD\n");
+
         return FALSE;
 
     }
@@ -896,7 +897,9 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
     if (decommitNum < numPages) {
 
         LeaveCriticalSection(&VADListHead.lock);
+
         PRINT_ALWAYS("[commitVA] Requested commit does not fall within a single VAD\n");
+
         return FALSE;
 
     }
@@ -943,37 +946,42 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
         if (tempPTE.u1.hPTE.validBit == 1) {                            // valid/hardware format
         
-
-            // get PFN
             PPFNdata currPFN;
+
+            //
+            // Get PFN metadata from PTE 
+            //
+
             currPFN = PFNarray + tempPTE.u1.hPTE.PFN;
 
+            //
             // acquire PFN lock
+            //
+            
             acquireJLock(&currPFN->lockBits);
-
 
             #ifdef TESTING_VERIFY_ADDRESSES
 
-            if ((ULONG_PTR) currVA != * (ULONG_PTR*) currVA) {
+                if ((ULONG_PTR) currVA != * (ULONG_PTR*) currVA) {
 
-                if (* (ULONG_PTR*) currVA == (ULONG_PTR)0) {
+                    if (* (ULONG_PTR*) currVA == (ULONG_PTR)0) {
 
-                    //
-                    // This may occur if a thread attempts to decommit an address WHILE
-                    // another thread is ACTIVELY WRITING IT (between pagefault and actual 
-                    // writing out in writeVA)
-                    //
+                        //
+                        // This may occur if a thread attempts to decommit an address WHILE
+                        // another thread is ACTIVELY WRITING IT (between pagefault and actual 
+                        // writing out in writeVA)
+                        //
 
-                    PRINT("Another thread is currently between pagefault and write in writeVA function\n");
+                        PRINT("Another thread is currently between pagefault and write in writeVA function\n");
 
-                } else {
+                    } else {
 
-                    PRINT_ERROR("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+                        PRINT_ERROR("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
 
-                }    
+                    }    
+                    
+                }
                 
-            }
-            
             #endif
 
 

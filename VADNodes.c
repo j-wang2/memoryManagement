@@ -6,8 +6,6 @@
 #include "VApermissions.h"
 
 
-
-
 PVADNode
 getVAD(void* virtualAddress)
 {
@@ -19,14 +17,15 @@ getVAD(void* virtualAddress)
     currPTE = getPTE(virtualAddress);
 
     for (currLinks = VADListHead.head.Flink; currLinks != &VADListHead.head; currLinks = currVAD->links.Flink) {
+        
+        PPTE currStartPTE;
+        PPTE currEndPTE;
 
         currVAD = CONTAINING_RECORD(currLinks, VADNode, links);
 
         ASSERT(currVAD->startVA != NULL);
-        ASSERT(currVAD->numPages != 0);
 
-        PPTE currStartPTE;
-        PPTE currEndPTE;
+        ASSERT(currVAD->numPages != 0);
 
         currStartPTE = getPTE(currVAD->startVA);
 
@@ -60,7 +59,7 @@ VOID
 enqueueVAD(PlistData listHead, PVADNode newNode)
 {
 
-    // EnterCriticalSection(&listHead->lock);
+    // EnterCriticalSection(&listHead->lock);       // todo - lock already acuired
 
     enqueue(&listHead->head, &newNode->links);
 
@@ -74,7 +73,7 @@ VOID
 dequeueSpecificVAD(PlistData listHead, PVADNode removeNode)
 {
 
-    // EnterCriticalSection(&listHead->lock);
+    // EnterCriticalSection(&listHead->lock);       // todo - already acquired?
 
     dequeueSpecific(&removeNode->links);
 
@@ -89,24 +88,28 @@ checkVADRange(void* startVA, ULONG_PTR size)
 
     PVADNode currVAD;
     PVOID endVAInclusive;
-
     PPTE startPTE;
     PPTE endPTE;
-    
     PPTE VADStartPTE;
     PPTE VADEndPTE;
-
     PLIST_ENTRY currLinks;
 
 
     if (size == 0) {
+
         PRINT_ERROR("Invalid size : 0\n");
         return FALSE;
+
     }
+
+    //
+    // Calculate inclusive endVA from startVA and size
+    //
 
     endVAInclusive = (PVOID) ( (ULONG_PTR) startVA + size - 1);
     
     startPTE = getPTE(startVA);
+
     endPTE = getPTE(endVAInclusive);
 
     for (currLinks = VADListHead.head.Flink; currLinks != &VADListHead.head; currLinks = currVAD->links.Flink) {
@@ -115,7 +118,12 @@ checkVADRange(void* startVA, ULONG_PTR size)
 
         ASSERT(currVAD->startVA != NULL);
 
+        //
+        // Derive starting and ending PTEs within current VAD itself
+        //
+
         VADStartPTE = getPTE(currVAD->startVA);
+        
         VADEndPTE = VADStartPTE + currVAD->numPages;
 
         // 
@@ -164,7 +172,14 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
 
     }
 
+    //
+    // Acquire both VAD locks in order to delete a VAD
+    // (Read lock first, then write lock) 
+    //
+
     EnterCriticalSection(&VADListHead.lock);
+
+    EnterCriticalSection(&VADWriteLock);
 
     if (isMemCommit) {
 
@@ -174,9 +189,14 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
 
         if (bRes == FALSE) {
 
+            LeaveCriticalSection(&VADWriteLock);
+
             LeaveCriticalSection(&VADListHead.lock);
+
             free(newNode);
+
             PRINT("[commitVAD] Unable to create new VAD node (insufficient commit charge)\n");
+
             return NULL;
 
         }
@@ -191,9 +211,14 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
 
         if ( ! checkVADRange(startVA, numPages)) {
 
+            LeaveCriticalSection(&VADWriteLock);
+
             LeaveCriticalSection(&VADListHead.lock);
+
             free(newNode);
+
             PRINT("[commitVAD] Unable to create new VAD node (address overlap)\n");
+
             return NULL;
 
         }
@@ -210,10 +235,15 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
         bitIndex = reserveBitRange(numPages, VADBitArray, virtualMemPages);
 
         if (bitIndex == INVALID_BITARRAY_INDEX) {
-            
+
+            LeaveCriticalSection(&VADWriteLock);
+
             LeaveCriticalSection(&VADListHead.lock);
+
             free(newNode);
+
             PRINT("[commitVAD] Unable to create new VAD node (address overlap)\n");
+
             return NULL;
 
         }
@@ -233,18 +263,41 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
     //
     // Calculate number of pages (NOT zero-indexed) "covered" by VAD
     //
+
     numVADPages = endPTE - startPTE + 1;
 
     newNode->numPages = numVADPages;
 
-    // update permissions
+    //
+    // Set permissions to permissions param
+    //
+
     newNode->permissions = permissions;
 
-    // set commitBit
+    //
+    // Set commitBit to parameter isMemCommit value
+    //
+
     newNode->commitBit = (ULONG64) isMemCommit;
 
-    // put into VAD node list
+    //
+    // Clear deleteBit (set by deleteVAD)
+    //
+
+    newNode->deleteBit = 0;
+
+    //
+    // Enqueue new VAD into VAD node list
+    //
+
     enqueueVAD(&VADListHead, newNode);
+
+    //
+    // Exit critical sections in inverse order of acquisition
+    // (release write lock first, then release list lock)
+    //
+
+    LeaveCriticalSection(&VADWriteLock);
 
     LeaveCriticalSection(&VADListHead.lock);
 
@@ -254,27 +307,41 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
 
 
 BOOLEAN
-deleteVAD(void* VA, ULONG_PTR size)
+deleteVAD(void* VA)
 {
 
     PVADNode removeVAD;
     BOOLEAN bRes;
 
     //
-    // Acquire VAD list lock
+    // Acquire both VAD locks in order to delete a VAD
+    // (Read lock first, then write lock) 
     //
 
     EnterCriticalSection(&VADListHead.lock);
+
+    EnterCriticalSection(&VADWriteLock);
 
     removeVAD = getVAD(VA);
 
     if (removeVAD == NULL) {
 
+        LeaveCriticalSection(&VADWriteLock);
+
         LeaveCriticalSection(&VADListHead.lock);
-        PRINT_ALWAYS("[deleteVAD] Provided VA does not correspond to any VAD\n");
+
+        PRINT("[deleteVAD] Provided VA does not correspond to any VAD\n");
+
         return FALSE;
 
     }
+
+    //
+    // Set deleteBit to signify to prospective faulters that the VAD is currently
+    // being deleted and to reject a pagefault accordingly.
+    //
+
+    removeVAD->deleteBit = 1;
 
     //
     // Decommit virtual address range within VAD, starting from startVA field and
@@ -284,14 +351,30 @@ deleteVAD(void* VA, ULONG_PTR size)
     bRes = decommitVA(removeVAD->startVA, (removeVAD->numPages) << PAGE_SHIFT);
 
     if (bRes == FALSE) {
+
+        LeaveCriticalSection(&VADWriteLock);
         
         LeaveCriticalSection(&VADListHead.lock);
+
         PRINT_ERROR("[deleteVAD] Unable to delete VAD, could not decommitVAs\n");
+
         return FALSE;
 
     }
 
+    //
+    // Remove VAD from list and release VAD lock before
+    // freeing struct
+    //
+
     dequeueSpecificVAD(&VADListHead, removeVAD);
+
+    //
+    // Exit critical sections in inverse order of acquisition
+    // (release write lock first, then release list lock)
+    //
+
+    LeaveCriticalSection(&VADWriteLock);
 
     LeaveCriticalSection(&VADListHead.lock);
 

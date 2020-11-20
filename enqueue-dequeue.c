@@ -2,19 +2,29 @@
 #include "jLock.h"
 #include "enqueue-dequeue.h"
 
+//
+// Defines cutoff (maximum) number of pages on the modified list 
+// before waking modified page writer
+//
+
 #define MODIFIED_PAGE_COUNT_THRESHOLD 10
 
 VOID 
 checkAvailablePages(PFNstatus dequeuedStatus)
 {
 
+    //
     // conditional covers zero, free, and standby (since they are smaller in the enum)
-    // if (dequeuedStatus <= STANDBY) {
-    if (dequeuedStatus <= ACTIVE) {
+    //
+    
+    if (dequeuedStatus <= STANDBY) {
 
-
-        // calculate available pages
         ULONG_PTR availablePageCount;
+
+        //
+        // calculate available pages
+        //
+
         availablePageCount = 0;
         
         //
@@ -24,6 +34,7 @@ checkAvailablePages(PFNstatus dequeuedStatus)
         for (int i = 0; i < STANDBY + 1; i++) {
 
             EnterCriticalSection(&listHeads[i].lock);
+
             availablePageCount += listHeads[i].count;
             
         }
@@ -101,9 +112,14 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
 
     ASSERT(PFN->lockBits != 0);
 
+    //
+    // PFNs being inserted to a list cannot have a set remodified bit,
+    // non-zero refcount or non-null read in prog event node
+    //
+
     ASSERT(PFN->remodifiedBit == 0);
 
-    // ASSERT(PFN->refCount == 0 && PFN->readInProgEventNode == NULL);   // todo check
+    ASSERT(PFN->refCount == 0 && PFN->readInProgEventNode == NULL);
 
     listStatus = listHead - listHeads;
 
@@ -121,55 +137,73 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
 
             #ifdef PAGEFILE_PFN_CHECK
 
-            PPTE currPTE;
-            currPTE = PTEarray + PFN->PTEindex;
+                PPTE currPTE;
+                PPageFileDebug checkEntry;
 
-            PPageFileDebug checkEntry;
+                currPTE = PTEarray + PFN->PTEindex;
 
-            EnterCriticalSection(&pageFileLock);
+                //
+                // Acquire pagefile lock
+                //
+
+                EnterCriticalSection(&pageFileLock);
+
+                for (ULONG_PTR j = 0; j < PAGEFILE_PAGES; j++) {
 
 
-            for (ULONG_PTR j = 0; j < PAGEFILE_PAGES; j++) {
+                    checkEntry = pageFileDebugArray + j;
 
+                    if (checkEntry->currPTE != NULL) {
 
-                checkEntry = pageFileDebugArray + j;
+                        //
+                        // This case CAN occur, where a PTE is decommitted and PFN is awaiting free,
+                        // but another thread recommits and decommits and 
+                        // TODO 
+                        //
 
-                if (checkEntry->currPTE != NULL) {
+                        // ASSERT(currPTE != checkEntry->currPTE);
 
-                    //
-                    // This case CAN occur, where a PTE is decommitted and PFN is awaiting free,
-                    // but another thread recommits and decommits and 
-                    // TODO 
-                    //
-
-                    // ASSERT(currPTE != checkEntry->currPTE);
+                    }
 
                 }
 
-
-            }
-
-
-            LeaveCriticalSection(&pageFileLock);
+                LeaveCriticalSection(&pageFileLock);
 
             #endif
 
         }
     }
 
-
-    //lock listHead (since listHead values are not changed/accessed until dereferenced)
+    //
+    // Acquire listHead lock (since listHead values cannot be changed/accessed accurately without lock)
+    //
+    
     EnterCriticalSection(&(listHead->lock));
 
-    // enqueue onto list
+    //
+    // Enqueue PFN to list and update pagecount
+    //
+
     enqueue( &(listHead->head), &(PFN->links) );
 
-    // update pagecount of that list
     listHead->count++;
 
     #ifdef MULTITHREADING
-    SetEvent(listHead->newPagesEvent);
+
+        //
+        // If multithreading is toggled on, set a new pages event to signal
+        // to free/zero page threads
+        //
+
+        SetEvent(listHead->newPagesEvent);
+
     #endif
+
+    //
+    // If list being enqueued to is modified list, check the 
+    // pageCount - if pagecount > 10, set return value to true
+    // signaling caller to wake modified page writer
+    //
 
     if (listStatus == MODIFIED) {
 
@@ -190,6 +224,7 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
     return wakeModifiedWriter;
 
 }
+
 
 #ifdef PAGEFILE_PFN_CHECK
 BOOLEAN
@@ -245,35 +280,57 @@ dequeuePage(PlistData listHead)
 {
 
     PLIST_ENTRY headLink;
-    headLink = &(listHead->head);
-
-
-    // list must have items chained to the head (since dequeueLockedPage checks)
-    ASSERT(headLink->Flink != headLink);
-    ASSERT(listHead->count != 0);
-
     PPFNdata returnPFN;
     PLIST_ENTRY returnLink;
     PLIST_ENTRY newFirst;
+
+    headLink = &(listHead->head);
+
+    //
+    // Assert that list must have items chained to the head (since parent function 
+    // dequeueLockedPage must check)
+    //
+
+    ASSERT(headLink->Flink != headLink);
+
+    ASSERT(listHead->count != 0);
+
     returnLink = headLink->Flink;
+
     newFirst = returnLink->Flink;
 
+    //
     // set headLink's flink to the return item's flink
+    //
+
     headLink->Flink = newFirst;
+
     newFirst->Blink = headLink;
 
-    // set returnLink's flink/blink to null before returning it
+    //
+    // set returnLink's flink/blink to null before returning to caller
+    //
+
     returnLink->Flink = NULL;
+
     returnLink->Blink = NULL;
 
-    // decrement count
+    //
+    // Decrement listHead data pageCount
+    //
+
     listHead->count--;
+
+    //
+    // Derive and return containing PFN metadata from links field
+    //
 
     returnPFN = CONTAINING_RECORD(returnLink, PFNdata, links);
 
     returnPFN->statusBits = NONE;
 
     return returnPFN;
+
 }
 
 
@@ -283,53 +340,89 @@ dequeueLockedPage(PlistData listHead, BOOLEAN returnLocked)
 
     PLIST_ENTRY headLink;
     PPFNdata headPFN;
+    PPFNdata returnPFN;
+    PFNstatus dequeueStatus;
     
     while (TRUE) {
 
-        // check the listhead flink
+        //
+        // "Peek" at the listhead's flink
+        //
+
         headLink = (listHead->head).Flink;
 
-        if (headLink == &(listHead->head) ) {
+        if (headLink == &listHead->head ) {
+
             PRINT("[dequeueLockedPage] List is empty - page cannot be dequeued\n");
             return NULL;
+
         }
 
         headPFN = CONTAINING_RECORD(headLink, PFNdata, links);
 
-        // lock page initially from at head - however it could have been pulled off list in meantime
-        acquireJLock(&(headPFN->lockBits));
+        //
+        // Lock page initially from at head - however it could have been pulled off list in meantime
+        //
 
-        // lock list - both locks are now acquired
+        acquireJLock(&headPFN->lockBits);
+
+        //
+        // Lock list itself - both list and page locks have now been acquired
+        //
+
         EnterCriticalSection(&(listHead->lock));
 
-        // check page remains at head of list
-        if (headLink == (listHead->head).Flink) {
-            break;
-        }
-        // - if not, release lock and try again
+        //
+        // Verify page remains at head of list - if so, break immediately
+        //
 
-        // release held locks (in diverging order in terms of "hotness")
+        if (headLink == (listHead->head).Flink) {
+
+            break;
+
+        }
+
+        //
+        // If page does not remain at head of list, release held locks 
+        // (in inverse order of acquisition) and try again
+        //
+
         LeaveCriticalSection(&listHead->lock);
 
-        releaseJLock(&(headPFN->lockBits));
+        releaseJLock(&headPFN->lockBits);
 
     }
-
-    PPFNdata returnPFN;
+    
+    //
+    // Dequeue page from listHead (since locked page remains at head of list)
+    //
 
     returnPFN = dequeuePage(listHead);
 
     ASSERT(returnPFN == headPFN);
 
-    LeaveCriticalSection(&(listHead->lock));
+    LeaveCriticalSection(&listHead->lock);
 
-    PFNstatus dequeueStatus;
+    //
+    // If list being dequeued from is free, zero, or standby, check
+    // available pages function will check to see whether there is a
+    // sufficient number of available pages. If the number of pages is 
+    // insufficient, the trim event is set.
+    //
+
     dequeueStatus = listHead - listHeads;
 
     checkAvailablePages(dequeueStatus);
-    // check "returnLocked" boolean flag
+
+    //
+    // If returnLocked param flag is TRUE, return PFN without
+    // unlocking. Otherwise, release PFN lock and return
+    //
+
     if (returnLocked == TRUE) {
+
         return returnPFN;
+
     }
 
     releaseJLock(&(headPFN->lockBits));
@@ -343,42 +436,69 @@ dequeuePageFromTail(PlistData listHead)
 {
 
     PLIST_ENTRY headLink;
+    PPFNdata returnPFN;
+    PLIST_ENTRY returnLink;
+    PLIST_ENTRY newLast;
+
     headLink = &(listHead->head);
 
-    // lock listHead
+    //
+    // Acquire listHead lock in order to check if there are pages on list
+    //
+     
     EnterCriticalSection(&(listHead->lock));
 
-    // verify list has items chained to the head
+    //
+    // Verify that list has items chained to the head. If no 
+    // items are on list, assert that count reflects that, release
+    // page lock and return NULL
+    //
+
     if (headLink->Flink == headLink) {
 
         ASSERT(listHead->count == 0);
 
-        // unlock listHead
-        LeaveCriticalSection(&(listHead->lock));
+        //
+        // Release listHead lock
+        //
+
+        LeaveCriticalSection(&listHead->lock);
 
         return NULL;
     }
 
     ASSERT(listHead->count != 0);
 
-    PPFNdata returnPFN;
-    PLIST_ENTRY returnLink;
-    PLIST_ENTRY newLast;
     returnLink = headLink->Blink;
+
     newLast = returnLink->Blink;
 
-    // set headLink's flink to the return item's flink
+    //
+    // Set headLink's flink to the return item's flink
+    //
+
     headLink->Blink = newLast;
+
     newLast->Flink = headLink;
 
-    // set returnLink's flink/blink to null before returning it
+    //
+    // Set returnLink's flink/blink to null before returning it
+    //
+
     returnLink->Flink = NULL;
+
     returnLink->Blink = NULL;
 
-    // decrement count
+    //
+    // Decrement listhead's page count
+    //
+
     listHead->count--;
 
-    // unlock listHead
+    //
+    // Release listHead lock before returning
+    //
+
     LeaveCriticalSection(&(listHead->lock));
     
     returnPFN = CONTAINING_RECORD(returnLink, PFNdata, links);
@@ -386,6 +506,7 @@ dequeuePageFromTail(PlistData listHead)
     returnPFN->statusBits = NONE;
 
     return returnPFN;
+
 }
 
 
@@ -394,58 +515,92 @@ dequeueLockedPageFromTail(PlistData listHead, BOOLEAN returnLocked)
 {
     PLIST_ENTRY tailLink;
     PPFNdata tailPFN;
+    PPFNdata returnPFN;
+    PFNstatus dequeueStatus;
 
     while (TRUE) {
 
-        // check listhead Blink
+        //
+        // "Peek" at the listhead's Blink
+        //
+
         tailLink = (listHead->head).Blink;
 
         if (tailLink == &(listHead->head) ) {
+
             PRINT("[dequeueLockedPageFromTail] List is empty - page cannot be dequeued\n");
             return NULL;
+            
         }
 
         tailPFN = CONTAINING_RECORD(tailLink, PFNdata, links);
 
-        // lock page initially at tail (it may have been pulled off list in meantime)
+        //
+        // Lock page initially at tail (it may have been pulled off list in meantime)
+        //
+
         acquireJLock(&(tailPFN->lockBits));
 
-        // lock list - both locks now acquired
-        EnterCriticalSection(&(listHead->lock));
+        //
+        // Lock list itself - both page and list locks have now been acquired
+        //
 
-        // verify page remains at tail of list
+        EnterCriticalSection(&listHead->lock);
+
+        //
+        // Verify page remains at tail of list - if so, break immediately
+        //
+
         if (tailLink == (listHead->head).Blink) {
+
             break;
+
         }
 
-        // if not, release the locks and try again
+        //
+        // If page does not remain at tail of list, release held locks 
+        // (in inverse order of acquisition) and try again
+        //
 
-        // release held locks (in diverging order in terms of "hotness")
-        LeaveCriticalSection(&(listHead->lock));
+        LeaveCriticalSection(&listHead->lock);
 
-        releaseJLock(&(tailPFN->lockBits));
+        releaseJLock(&tailPFN->lockBits);
 
     }
 
-    PPFNdata returnPFN;
+    //
+    // Dequeue page from listHead (since locked page remains at tail of list)
+    //
 
     returnPFN = dequeuePageFromTail(listHead);
 
     ASSERT(returnPFN == tailPFN);
 
-    LeaveCriticalSection(&(listHead->lock));
+    LeaveCriticalSection(&listHead->lock);
 
-    PFNstatus dequeueStatus;
+    //
+    // If list being dequeued from is free, zero, or standby, check
+    // available pages function will check to see whether there is a
+    // sufficient number of available pages. If the number of pages is 
+    // insufficient, the trim event is set.
+    //
+
     dequeueStatus = listHead - listHeads;
 
     checkAvailablePages(dequeueStatus);
 
-    // check "returnLocked" boolean flag
+    //
+    // If returnLocked param flag is TRUE, return PFN without
+    // unlocking. Otherwise, release PFN lock and return
+    //
+
     if (returnLocked == TRUE) {
+
         return returnPFN;
+
     }
 
-    releaseJLock(&(tailPFN->lockBits));
+    releaseJLock(&tailPFN->lockBits);
 
     return returnPFN;
 
@@ -474,18 +629,34 @@ VOID
 dequeueSpecificPage(PPFNdata removePage)
 {
 
-    EnterCriticalSection(&(listHeads[removePage->statusBits].lock));
+    //
+    // Assert page lock is held by caller
+    //
 
-    dequeueSpecific( &(removePage->links) );
+    ASSERT(removePage->lockBits != 0);
 
-    // decrement count for that list
+    //
+    // Acquire list lock
+    //
+
+    EnterCriticalSection(&listHeads[removePage->statusBits].lock);
+
+    dequeueSpecific(&removePage->links);
+
+    //
+    // Decrement pageCount for that list
+    //
+
     listHeads[removePage->statusBits].count--;
 
     LeaveCriticalSection(&(listHeads[removePage->statusBits].lock));
 
     checkAvailablePages(removePage->statusBits);
 
-    // still holding page lock
+    //
+    // Page lock remains held on return
+    //
+
     removePage->statusBits = NONE;
 
 }
@@ -496,28 +667,44 @@ dequeueVA(PlistData listHead)
 {
 
     PLIST_ENTRY headLink;
-    headLink = &(listHead->head);
-
-
-    // list must have items chained to the head (since dequeueLockedVA checks)
-    ASSERT(headLink->Flink != headLink);
-    ASSERT(listHead->count != 0);
-
     PVANode returnVANode;
     PLIST_ENTRY returnLink;
     PLIST_ENTRY newFirst;
+
+    headLink = &(listHead->head);
+
+    //
+    // List must have items chained to the head (since dequeueLockedVA checks)
+    //
+
+    ASSERT(headLink->Flink != headLink);
+
+    ASSERT(listHead->count != 0);
+
     returnLink = headLink->Flink;
+
     newFirst = returnLink->Flink;
 
-    // set headLink's flink to the return item's flink
+    //
+    // Set headLink's flink to the return item's flink
+    //
+
     headLink->Flink = newFirst;
+
     newFirst->Blink = headLink;
 
-    // set returnLink's flink/blink to null before returning it
+    //
+    // Set returnLink's flink/blink to null before returning it
+    //
+
     returnLink->Flink = NULL;
+
     returnLink->Blink = NULL;
 
-    // decrement count
+    //
+    // Decrement listhead pagecount
+    //
+
     listHead->count--;
 
     returnVANode = CONTAINING_RECORD(returnLink, VANode, links);
@@ -533,38 +720,55 @@ dequeueLockedVA(PlistData listHead)
     
     PLIST_ENTRY headLink;
     PVANode headNode;
+    PVANode returnVANode;
 
     while (TRUE) {
 
-        // check the listhead flink
+        //
+        // "Peek" at the listhead's flink
+        //
+
         headLink = (listHead->head).Flink;
 
         if (headLink == &listHead->head) {
+
             PRINT("[dequeueVA] List is empty - VA node cannot be dequeued\n");
             return NULL;
+
         }
 
         headNode = CONTAINING_RECORD(headLink, VANode, links);
 
-        //lock listHead (since listHead values are not changed/accessed until dereferenced)
-        EnterCriticalSection(&listHead->lock);
+        //
+        // Lock list to check that node remains at head of list - if so, break immediately
+        //
 
-        // verify node remains at head of list
+        EnterCriticalSection(&listHead->lock);
+        
         if (headLink == (listHead->head).Flink) {
+
             break;
+
         }
+        
+        //
+        // Otherwise, release listhead lock and try again
+        //
 
         LeaveCriticalSection(&listHead->lock);
 
     }
 
-    PVANode returnVANode;
+    //
+    // Dequeue node from listHead (since node remains at head of list and 
+    // list has remained locked)
+    //
+
     returnVANode = dequeueVA(listHead);
 
     ASSERT(returnVANode == headNode);
 
     LeaveCriticalSection(&listHead->lock);
-
 
     return returnVANode;
 
@@ -575,20 +779,34 @@ VOID
 enqueueVA(PlistData listHead, PVANode VANode)
 {
 
-    //lock listHead (since listHead values are not changed/accessed until dereferenced)
-    EnterCriticalSection(&(listHead->lock));
+    //
+    // Lock listHead (since listHead values are not changed/accessed until dereferenced)
+    //
 
-    // enqueue onto list
-    enqueue( &(listHead->head), &(VANode->links) );
+    EnterCriticalSection(&listHead->lock);
 
-    // update pagecount of that list
+    //
+    // Enqueue onto list
+    //
+
+    enqueue(&listHead->head, &VANode->links);
+
+    //
+    // Update Listhead pagecount
+    //
+
     listHead->count++;
 
     #ifdef MULTITHREADING
-    SetEvent(listHead->newPagesEvent);
+
+        SetEvent(listHead->newPagesEvent);
+
     #endif
 
-    // unlock listHead
+    //
+    // Release listHead lock
+    //
+
     LeaveCriticalSection(&(listHead->lock));
 
 }
@@ -597,34 +815,52 @@ enqueueVA(PlistData listHead, PVANode VANode)
 PeventNode
 dequeueEvent(PlistData listHead)
 {
+
     PLIST_ENTRY headLink;
     PeventNode returnNode;
     PLIST_ENTRY returnLink;
     PLIST_ENTRY newFirst;
+
     headLink = &(listHead->head);
 
+    //
+    // List must have items chained to the head (since dequeueLockedVA checks)
+    //
 
-    // list must have items chained to the head (since dequeueLockedVA checks)
     ASSERT(headLink->Flink != headLink);
+
     ASSERT(listHead->count != 0);
 
     returnLink = headLink->Flink;
+
     newFirst = returnLink->Flink;
 
-    // set headLink's flink to the return item's flink
+    //
+    // Set headLink's flink to the return item's flink
+    //
+
     headLink->Flink = newFirst;
+
     newFirst->Blink = headLink;
 
-    // set returnLink's flink/blink to null before returning it
+    //
+    // Set returnLink's flink/blink to null before returning it
+    //
+
     returnLink->Flink = NULL;
+
     returnLink->Blink = NULL;
 
-    // decrement count
+    //
+    // Decrement event node count
+    //
+
     listHead->count--;
 
     returnNode = CONTAINING_RECORD(returnLink, eventNode, links);
 
     return returnNode;
+
 }
 
 
@@ -634,37 +870,58 @@ dequeueLockedEvent(PlistData listHead)
 
     PLIST_ENTRY headLink;
     PeventNode headNode;
+    PeventNode returnNode;
+    BOOL bResult;
 
     while (TRUE) {
 
-        // check the listhead flink
+        //
+        // "Peek" at the listhead's flink
+        //
+
         headLink = (listHead->head).Flink;
 
         if (headLink == &listHead->head) {
+
             PRINT("[dequeueVA] List is empty - VA node cannot be dequeued\n");
             return NULL;
+
         }
 
         headNode = CONTAINING_RECORD(headLink, eventNode, links);
 
-        //lock listHead (since listHead values are not changed/accessed until dereferenced)
+        //
+        // Lock listHead (since listHead values are not changed/accessed until dereferenced)
+        //
+
         EnterCriticalSection(&(listHead->lock));
 
-        // verify node remains at head of list
+        //
+        // Verify node remains at head of list
+        //
+
         if (headLink == (listHead->head).Flink) {
+
             break;
+
         }
 
         LeaveCriticalSection(&listHead->lock);
 
     }
 
-    PeventNode returnNode;
+    //
+    // Dequeue event from listHead (since locked event remains at head of list)
+    //
+
     returnNode = dequeueEvent(listHead);
 
     ASSERT(returnNode == headNode);
 
-    BOOL bResult;
+    //
+    // Reset event before returning (so event will not be set initially)
+    //
+
     bResult = ResetEvent(returnNode->event);
     
     if (bResult != TRUE) {
@@ -675,29 +932,43 @@ dequeueLockedEvent(PlistData listHead)
 
     LeaveCriticalSection(&listHead->lock);
 
-
     return returnNode;
+
 }
 
 
 VOID
 enqueueEvent(PlistData listHead, PeventNode eventNode)
 {
-    
-    //lock listHead (since listHead values are not changed/accessed until dereferenced)
-    EnterCriticalSection(&(listHead->lock));
 
+    //
+    // Lock listHead (since listHead values are not changed/accessed until dereferenced)
+    //
+
+    EnterCriticalSection(&listHead->lock);
+
+    //
     // enqueue onto list
-    enqueue( &(listHead->head), &(eventNode->links) );
+    //
 
-    // update pagecount of that list
+    enqueue(&listHead->head, &eventNode->links);
+
+    //
+    // Update listhead event count
+    //
+
     listHead->count++;
 
     #ifdef MULTITHREADING
-    SetEvent(listHead->newPagesEvent);
+
+        SetEvent(listHead->newPagesEvent);
+
     #endif
 
-    // unlock listHead
+    //
+    // Release listHead lock
+    //
+    
     LeaveCriticalSection(&(listHead->lock));
 
 }

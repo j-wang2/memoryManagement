@@ -6,8 +6,9 @@ typedef struct _VADNode {
     ULONG64 numPages;
     ULONG64 permissions: PERMISSIONS_BITS;
     ULONG64 commitBit: 1;
+    ULONG64 deleteBit: 1;
     ULONG64 commitCount;
-    ULONG64 refCount;
+    // ULONG64 refCount;
     HANDLE faultEvent;
 } VADNode, *PVADNode;
 
