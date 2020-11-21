@@ -12,96 +12,103 @@ faultStatus
 accessVA (PVOID virtualAddress, PTEpermissions RWEpermissions) 
 {
 
-    // initialize PFstatus to success - only changes on pagefault return val
     faultStatus PFstatus;
+
+    //
+    // Initialize PFstatus to success - only changes on pagefault return val
+    //
+
     PFstatus = SUCCESS;
 
-    // todo - cannot get page_state_change once fixed in pf handler
+    while (PFstatus == SUCCESS ) {
 
-    while (PFstatus == SUCCESS || PFstatus == PAGE_STATE_CHANGE ) {
-        
         #ifdef AV_TEMP_TESTING
 
-        //
-        // For special pool/application verifier
-        //
+            //
+            // Workaround for special pool/application verifier
+            //
 
-        PPTE currPTE;
-        currPTE = getPTE(virtualAddress);
+            PPTE currPTE;
+            PTE snapPTE;
 
-        PTE snapPTE;
-        snapPTE = *currPTE;
+            currPTE = getPTE(virtualAddress);
 
-        if (snapPTE.u1.hPTE.validBit == 1) {
+            snapPTE = *currPTE;
 
-            ULONG_PTR currPFNindex;
+            if (snapPTE.u1.hPTE.validBit == 1) {
 
-            currPFNindex = snapPTE.u1.hPTE.PFN;
+                PPFNdata currPFN;
+                ULONG_PTR currPFNindex;
 
-            PPFNdata currPFN;
-            currPFN = PFNarray + currPFNindex;
+                currPFNindex = snapPTE.u1.hPTE.PFN;
 
-            acquireJLock(&currPFN->lockBits);
+                currPFN = PFNarray + currPFNindex;
 
+                acquireJLock(&currPFN->lockBits);
 
-            if (snapPTE.u1.ulongPTE == currPTE->u1.ulongPTE) {
+                if (snapPTE.u1.ulongPTE == currPTE->u1.ulongPTE) {
 
-                PTEpermissions tempRWEpermissions = getPTEpermissions(snapPTE);
+                    PTEpermissions tempRWEpermissions;
+                    
+                    tempRWEpermissions = getPTEpermissions(snapPTE);
 
-                if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {
+                    if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {
+
+                        releaseJLock(&currPFN->lockBits);
+
+                        PFstatus = pageFault(virtualAddress, RWEpermissions);
+
+                        PRINT("Invalid permissions\n");
+
+                        return PFstatus;
+
+                    } 
 
                     releaseJLock(&currPFN->lockBits);
-                    PFstatus = pageFault(virtualAddress, RWEpermissions);
-                    PRINT_ERROR("Invalid permissions\n");
-                    return PFstatus;
 
-                } 
+                    return SUCCESS;
 
-                releaseJLock(&currPFN->lockBits);
+                }
+                else {
 
-                return SUCCESS;
+                    releaseJLock(&currPFN->lockBits);
+
+                    continue;
+                    
+                }
+
+            } else {
+
+                PFstatus = pageFault(virtualAddress, RWEpermissions);
 
             }
-            else {
-
-                releaseJLock(&currPFN->lockBits);
-
-                continue;
-                
-            }
-
-        } else {
-
-            PFstatus = pageFault(virtualAddress, RWEpermissions);
-
-        }
 
 
         #else
 
-        _try {
+            _try {
 
-            if (RWEpermissions == READ_ONLY || READ_EXECUTE) {
+                if (RWEpermissions == READ_ONLY || READ_EXECUTE) {
 
-                *(volatile CHAR *)virtualAddress;                                       // read
+                    *(volatile CHAR *)virtualAddress;                                       // read
 
-            } else if (RWEpermissions == READ_WRITE || READ_WRITE_EXECUTE) {
+                } else if (RWEpermissions == READ_WRITE || READ_WRITE_EXECUTE) {
 
-                *(volatile CHAR *)virtualAddress = *(volatile CHAR *)virtualAddress;    // write
+                    *(volatile CHAR *)virtualAddress = *(volatile CHAR *)virtualAddress;    // write
 
-            } else {
+                } else {
 
-                PRINT_ERROR("invalid permissions\n");    
+                    PRINT_ERROR("invalid permissions\n");    
+
+                }
+
+                break;
+
+            } _except (EXCEPTION_EXECUTE_HANDLER) {
+
+                PFstatus = pageFault(virtualAddress, RWEpermissions);
 
             }
-
-            break;
-
-        } _except (EXCEPTION_EXECUTE_HANDLER) {
-
-            PFstatus = pageFault(virtualAddress, RWEpermissions);
-
-        }
 
         #endif
 
@@ -120,9 +127,7 @@ writeVA(PVOID virtualAddress, PVOID str)
 
     PFstatus = accessVA(virtualAddress, READ_WRITE);
 
-    // todo - cannot get page_state_change once fixed in pf handler
-
-    while (PFstatus == SUCCESS || PFstatus == PAGE_STATE_CHANGE ) {
+    while (PFstatus == SUCCESS ) {
 
         _try {
 
@@ -538,10 +543,13 @@ trimPTE(PPTE PTEaddress)
     ULONG_PTR pageNum;
     PPFNdata PFNtoTrim;
     PVOID currVA;
+    PTE newPTE;
 
     if (PTEaddress == NULL) {
+
         PRINT_ERROR("could not trim - invalid PTE\n");
         return FALSE;
+
     }
     
 
@@ -569,28 +577,30 @@ trimPTE(PPTE PTEaddress)
 
     }
 
-    // get pageNum
     pageNum = oldPTE.u1.hPTE.PFN;
 
-    // get PFN
     PFNtoTrim = PFNarray + pageNum;
-
 
     ASSERT(PFNtoTrim->statusBits == ACTIVE);
 
+    //
+    // Initialize new PTE to zero
+    //
 
-    // zero new PTE
-    PTE newPTE;
     newPTE.u1.ulongPTE = 0;
-
 
     currVA = (PVOID) ( (ULONG_PTR) leafVABlock + (PTEaddress - PTEarray) *PAGE_SIZE );
     
-    // unmap page from VA (invalidates hardwarePTE)
+    //
+    // Unmap page from VA (invalidates hardwarePTE)
+    //
+
     MapUserPhysicalPages(currVA, 1, NULL);
 
+    //
+    // Acquire page lock (prior to viewing/editing PFN fields)
+    //
 
-    // acquire page lock (prior to viewing/editing PFN fields)
     acquireJLock(&PFNtoTrim->lockBits);
 
     //
@@ -601,7 +611,7 @@ trimPTE(PPTE PTEaddress)
     // setting status bits to modified.
     //
 
-    if (PFNtoTrim->writeInProgressBit == 1 || PFNtoTrim->readInProgressBit == 1) {       // TODO - must be updated to include read in progress/refcount info
+    if (PFNtoTrim->writeInProgressBit == 1 || PFNtoTrim->readInProgressBit == 1) {
 
         if (oldPTE.u1.hPTE.dirtyBit == 0) {
 
@@ -612,7 +622,10 @@ trimPTE(PPTE PTEaddress)
             
             ASSERT(oldPTE.u1.hPTE.dirtyBit == 1);
 
-            // notify modified writer that page has been re-modified since initial write began
+            //
+            // Notify modified writer that page has been re-modified since initial write began
+            //
+
             PFNtoTrim->remodifiedBit = 1;
 
             PFNtoTrim->statusBits = MODIFIED;
@@ -622,10 +635,18 @@ trimPTE(PPTE PTEaddress)
     }
     else {
 
-        // check dirtyBit to see if page has been modified
+        ASSERT(PFNtoTrim->refCount == 0);
+
+        //
+        // Check dirtyBit to see if page has been modified
+        //
+
         if (oldPTE.u1.hPTE.dirtyBit == 0 && PFNtoTrim->remodifiedBit == 0) {
 
-            // add given VA's page to standby list
+            //
+            // Add given VA's page to standby list
+            //
+
             enqueuePage(&standbyListHead, PFNtoTrim);
 
         } 
@@ -648,7 +669,10 @@ trimPTE(PPTE PTEaddress)
 
             PFNtoTrim->remodifiedBit = 0;
 
-            // add given VA's page to modified list;
+            //
+            // Add given VA's page to modified list
+            //
+
             wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoTrim);
 
         }
@@ -678,10 +702,13 @@ trimPTE(PPTE PTEaddress)
     if (wakeModifiedWriter == TRUE) {
 
         BOOL bRes;
+
         bRes = SetEvent(wakeModifiedWriterHandle);
 
         if (bRes != TRUE) {
+
             PRINT_ERROR("[trimPTE] failed to set event\n");
+
         }
 
         ResetEvent(wakeModifiedWriterHandle);
@@ -697,9 +724,10 @@ BOOLEAN
 trimVA(void* virtualAddress)
 {
 
+    PPTE PTEaddress;
+
     PRINT("[trimVA] trimming page with VA %llu\n", (ULONG_PTR) virtualAddress);
 
-    PPTE PTEaddress;
     PTEaddress = getPTE(virtualAddress);
 
     return trimPTE(PTEaddress);
@@ -726,7 +754,10 @@ protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize)
 
     }
 
-    // inclusive (use <= as condition)
+    //
+    // Calculate an inclusive endVA (use <= as condition)
+    //
+
     endVA = (PVOID) ((ULONG_PTR) startVA + commitSize - 1);
 
     endPTE = getPTE(endVA);
@@ -947,6 +978,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
         if (tempPTE.u1.hPTE.validBit == 1) {                            // valid/hardware format
         
             PPFNdata currPFN;
+            BOOL bResult;
 
             //
             // Get PFN metadata from PTE 
@@ -984,13 +1016,13 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
                 
             #endif
 
+            //
+            // Unmap VA from page
+            //
 
-            // unmap VA from page
-            BOOL bResult;
             bResult = MapUserPhysicalPages(currVA, 1, NULL);
 
 
-            // TODO - can this happen when 2x VAs are mapped?
             if (bResult != TRUE) {
 
                 PRINT_ERROR("[decommitVA] unable to decommit VA %llx - MapUserPhysical call failed\n", (ULONG_PTR) currVA);
@@ -1023,7 +1055,10 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
                 currPFN->remodifiedBit = 0;
 
-                // enqueue Page to free list
+                //
+                // Enqueue page to free list
+                //
+
                 enqueuePage(&freeListHead, currPFN);
 
             }
@@ -1045,7 +1080,10 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
             acquireJLock(&currPFN->lockBits);
 
-            // Verify the PTE is still in transition format and pointed to by PTE index
+            //
+            // Verify PTE is still in transition format and pointed to by PTE index
+            //
+            
             if ( tempPTE.u1.ulongPTE != currPTE->u1.ulongPTE
             || (currPFN->statusBits != STANDBY && currPFN->statusBits != MODIFIED)
             || currPFN->PTEindex != (ULONG64) (currPTE - PTEarray) ) {
@@ -1067,7 +1105,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
             }
             
             //
-            // only dequeue if both read in progress and write in progress bits are zero
+            // Dequeue PFN only if both read in progress and write in progress bits are clear
             //
 
             if (currPFN->writeInProgressBit == 1 || currPFN->readInProgressBit == 1) {

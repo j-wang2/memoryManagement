@@ -7,6 +7,7 @@
 #include <tchar.h>
 #include <stdbool.h>
 #include <windows.h>
+#include <math.h> 
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "MinCore.lib")
 
@@ -19,13 +20,12 @@
 
 
 /*********** Testing macros ************/
-#define CHECK_PFNS
+// #define CHECK_PFNS
 // #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing
                                                 // program to run sans pagefile
-#define PTE_CHANGE_LOG
-#define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
+// #define PTE_CHANGE_LOG
+// #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
                                                 // for the pagefile that includes additional information
-#define VERIFY_ADDRESS_SIGNATURES
 #define AV_TEMP_TESTING                                // temporary workaround for PF due to app verifier
 #define TESTING_ZERO                                // toggles zero page thread
 #define TESTING_MODIFIED                            // toggles modified page writer thread
@@ -36,8 +36,10 @@
 
 /*********** number of physical memory pages to allocate (+ PF pages for total memory) **********/
 // #define NUM_PAGES 64
-#define NUM_PAGES 512
-// #define NUM_PAGES 2048
+// #define NUM_PAGES 512
+#define NUM_PAGES 2048
+// #define NUM_PAGES 512*8  
+// #define NUM_PAGES 640000
 
 #define MIN_AVAILABLE_PAGES 100
 
@@ -46,8 +48,10 @@
 
 /********** PTE bit macros *************/
 #define PERMISSIONS_BITS 3                          // bits in non-valid PTE formats reserved for permissions
-#define PTE_INDEX_BITS 12                            // log2(NUM_PAGES)
-#define PFN_BITS 40                                 // number of bits to store PFN index
+
+#define PTE_INDEX_BITS 12                           // number of bits to store PTE index (tied to # of VM pages)
+
+#define PFN_BITS 40                                 // number of bits to store PFN index (tied to physical pages returned)
 
 
 /************ page size macros ***********/
@@ -278,42 +282,6 @@ extern CRITICAL_SECTION pageFileLock;
 extern CRITICAL_SECTION VADWriteLock;
 
 
-
-// TODO
-// /*****************************************************************
-
-//     * ADAPTED FROM https://docs.microsoft.com/en-us/windows/win32/memory/awe-example *
-
-//    LoggedSetLockPagesPrivilege: a function to obtain or
-//    release the privilege of locking physical pages.
-
-//    Inputs:
-
-//        HANDLE hProcess: Handle for the process for which the
-//        privilege is needed
-
-//        BOOL bEnable: Enable (TRUE) or disable?
-
-//    Return value: TRUE indicates success, FALSE failure.
-
-
-// *****************************************************************/
-// BOOL
-// LoggedSetLockPagesPrivilege ( HANDLE hProcess,
-//                               BOOL bEnable);
-
-
-// /*
-//  * getPrivilege: wrapper function for getting page mapping privilege
-//  * 
-//  * Returns BOOLEAN:
-//  *  - TRUE on success
-//  *  - FALSE on failure
-//  */
-// BOOL
-// getPrivilege ();
-
-
 BOOLEAN
 zeroPage(ULONG_PTR PFN);
 
@@ -324,6 +292,7 @@ zeroPageWriter();
 
 DWORD WINAPI
 zeroPageThread();
+
 
 VOID
 releaseAwaitingFreePFN(PPFNdata PFNtoFree);

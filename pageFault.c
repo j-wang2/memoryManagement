@@ -24,7 +24,7 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 
     if (!checkPTEpermissions(tempRWEpermissions, RWEpermissions)) {
 
-        PRINT_ERROR("Invalid permissions\n");
+        PRINT("Invalid permissions\n");
         return ACCESS_VIOLATION;
 
     } 
@@ -125,7 +125,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
     if (!checkPTEpermissions(transRWEpermissions, RWEpermissions)) {
 
-        PRINT_ERROR("Invalid permissions\n");
+        PRINT("Invalid permissions\n");
         return ACCESS_VIOLATION;
 
     }
@@ -204,8 +204,9 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
         //
         // Assert PFN has not changed since release/re-acquisition of page lock,
-        // since refcount is bumped (and this count must be 0 before making any
-        // page changes in the TODO functions)
+        // since refcount is bumped (and this count should mirror the cleared status
+        // of the read in progress bit, which is checked before making any
+        // page changes in the trim/decommit/other pagefault functions)
         //
 
         ASSERT(currEventNode == transitionPFN->readInProgEventNode);
@@ -380,7 +381,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     
     if (!checkPTEpermissions(pageFileRWEpermissions, RWEpermissions)) {
 
-        PRINT_ERROR("Invalid permissions\n");
+        PRINT("Invalid permissions\n");
         return ACCESS_VIOLATION;
 
     }
@@ -501,7 +502,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     ULONG_PTR signature;
 
-    #ifdef VERIFY_ADDRESS_SIGNATURES
+    #ifdef TESTING_VERIFY_ADDRESSES
 
         signature = (ULONG_PTR) virtualAddress & ~(PAGE_SIZE - 1);
     
@@ -1072,11 +1073,17 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
         }
 
     }
-    // else if (status == PAGE_STATE_CHANGE) {       todo
+    else if (status == PAGE_STATE_CHANGE) {
 
-    //     PRINT("[pageFile] transition page has changed state\n");
-    //     status = SUCCESS;
-    // }
+        PRINT("[pageFile] transition page has changed state\n");
+
+        //
+        // set status to SUCCESS so that caller will re-fault the PTE
+        //
+
+        status = SUCCESS;
+
+    }
     
     return status;
 

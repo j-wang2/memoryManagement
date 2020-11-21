@@ -42,7 +42,7 @@ enqueueVAD(PlistData listHead, PVADNode newNode);
  * No return value
  */
 VOID
-dequeueSpecificVAD(PlistData listHead, PVADNode removeNode);
+dequeueSpecificVAD(PVADNode removeNode);
 
 
 /*
@@ -58,9 +58,29 @@ BOOLEAN
 checkVADRange(void* startVA, ULONG_PTR size);
 
 
+/*
+ * createVAD: function to create a new VAD
+ *  - acquires "read" and "write" locks 
+ *  - calls checkVAD range to verify that the range is clear
+ * 
+ * Returns PVADNode
+ *  - New node if successful
+ *  - NULL if unsuccessful
+ */
 PVADNode
 createVAD(void* startVA, ULONG_PTR size, PTEpermissions permissions, BOOLEAN isMemCommit);
 
 
+/*
+ * deleteVAD: function to delete a new VAD
+ *  - acquires "read " and "write" locks, setting a delete bit
+ *    and releasing both before calling decommit
+ *  - calls decommitVA (which in turn acquires "read" and PTE locks in that order)
+ *  - Re-acquires locks before dequeing from list
+ * 
+ * Returns BOOLEAN
+ *  - TRUE if successful
+ *  - FALSE if unsuccessful
+ */
 BOOLEAN
 deleteVAD(void* VA);

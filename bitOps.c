@@ -114,7 +114,7 @@ reserveBitRange(ULONG_PTR bits, PULONG_PTR bitArray, ULONG_PTR bitArraySize)
 
     } else {
 
-        PRINT_ALWAYS("[reserveBitRange] unable to find free bit range\n");
+        PRINT("[reserveBitRange] unable to find free bit range\n");
         return INVALID_BITARRAY_INDEX;
 
     }

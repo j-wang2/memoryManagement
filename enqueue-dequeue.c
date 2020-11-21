@@ -157,8 +157,8 @@ enqueuePage(PlistData listHead, PPFNdata PFN)
 
                         //
                         // This case CAN occur, where a PTE is decommitted and PFN is awaiting free,
-                        // but another thread recommits and decommits and 
-                        // TODO 
+                        // but another thread recommits and decommits at a different PTE with the same 
+                        // PFN, causing this assert to hit. Therefore, this assert must be toggled on carefully
                         //
 
                         // ASSERT(currPTE != checkEntry->currPTE);

@@ -41,7 +41,7 @@ getVAD(void* virtualAddress)
         // end PTE of the VAD, return pointer to the VAD
         //
 
-        if (currStartPTE <= currPTE && currPTE <= currEndPTE) {  // TODO
+        if (currStartPTE <= currPTE && currPTE <= currEndPTE) {
 
             return currVAD;
             
@@ -59,25 +59,16 @@ VOID
 enqueueVAD(PlistData listHead, PVADNode newNode)
 {
 
-    // EnterCriticalSection(&listHead->lock);       // todo - lock already acuired
-
     enqueue(&listHead->head, &newNode->links);
-
-    // LeaveCriticalSection(&listHead->lock);
-
 
 }
 
 
 VOID
-dequeueSpecificVAD(PlistData listHead, PVADNode removeNode)
+dequeueSpecificVAD(PVADNode removeNode)
 {
 
-    // EnterCriticalSection(&listHead->lock);       // todo - already acquired?
-
     dequeueSpecific(&removeNode->links);
-
-    // LeaveCriticalSection(&listHead->lock);
 
 }
 
@@ -344,6 +335,16 @@ deleteVAD(void* VA)
     removeVAD->deleteBit = 1;
 
     //
+    // Release locks (in inverse order) prior to decommit (since decommit call
+    // acquires read lock and then PTE lock, which could cause AB/BA deadlock 
+    // with a competing VAD fault thread)
+    //
+
+    LeaveCriticalSection(&VADWriteLock);
+
+    LeaveCriticalSection(&VADListHead.lock);
+
+    //
     // Decommit virtual address range within VAD, starting from startVA field and
     // spanning number of pages specified by numPages field
     //
@@ -352,22 +353,26 @@ deleteVAD(void* VA)
 
     if (bRes == FALSE) {
 
-        LeaveCriticalSection(&VADWriteLock);
-        
-        LeaveCriticalSection(&VADListHead.lock);
-
         PRINT_ERROR("[deleteVAD] Unable to delete VAD, could not decommitVAs\n");
 
         return FALSE;
 
     }
 
+    // 
+    // Re-acquire locks in read-write order bbefore removing VAD from list
+    //
+    
+    EnterCriticalSection(&VADListHead.lock);
+
+    EnterCriticalSection(&VADWriteLock);
+
     //
     // Remove VAD from list and release VAD lock before
     // freeing struct
     //
 
-    dequeueSpecificVAD(&VADListHead, removeVAD);
+    dequeueSpecificVAD(removeVAD);
 
     //
     // Exit critical sections in inverse order of acquisition

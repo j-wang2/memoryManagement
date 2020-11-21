@@ -260,7 +260,7 @@ writePageToFileSystem(PPFNdata PFNtoWrite, ULONG_PTR expectedSig)
     // Verify signature written to filesystem is expected (either VA signature or 0)
     //
 
-    #ifdef VERIFY_ADDRESS_SIGNATURES
+    #ifdef TESTING_VERIFY_ADDRESSES
 
         ASSERT(expectedSig == * (PULONG_PTR) modifiedWriteVA || * (PULONG_PTR) modifiedWriteVA == 0 );
 
@@ -364,7 +364,7 @@ readPageFromFileSystem(ULONG_PTR destPFN, ULONG_PTR pageFileIndex, ULONG_PTR exp
     // Verify signature is coming back as expected (either VA signature or 0)
     //
 
-    #ifdef VERIFY_ADDRESS_SIGNATUREs
+    #ifdef TESTING_VERIFY_ADDRESSES
 
         ASSERT(expectedSig == * (PULONG_PTR) readPFVA || * (PULONG_PTR) readPFVA == 0 );
 

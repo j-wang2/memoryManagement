@@ -221,6 +221,19 @@ initPFNarray(PULONG_PTR arrayPFNs, ULONG_PTR numPages)
         }
 
     }
+    
+
+    //
+    // If the maximum numerical PFN cannot fit within 40 bits allocated for PFN index in the PTE,
+    // print an error message and return
+    //
+
+    if ( ( (ULONG_PTR)1 << PFN_BITS) < maxPFN ) {
+
+        PRINT_ERROR("Insufficient PFN bits in PTE (cannot represent maximum PFN value returned)\n");
+        exit(-1);
+
+    }
 
     //
     // Virtual Alloc (with MEM_RESERVE) PFN metadata array
@@ -326,7 +339,15 @@ initPageFile(ULONG_PTR diskSize)
 
     #ifndef PAGEFILE_OFF
 
-    InterlockedIncrement64(&totalCommittedPages); // todo - (currently used as a "working " page)
+        #ifdef PAGE_TRADE
+
+            //
+            // Used as a "working" page for page trading in order to avoid deadlock
+            //
+
+            InterlockedIncrement64(&totalCommittedPages); 
+
+        #endif
 
     #else
     for (int i = 0; i < PAGEFILE_PAGES; i++) {
@@ -1047,8 +1068,8 @@ faultAndAccessTest()
     // ULONG_PTR vadSize = virtualMemPages;
     ULONG_PTR vadSize = 512;
     
-    createVAD(NULL, vadSize, READ_WRITE, TRUE);         // MEM_COMMIT vad (todo)
-    // createVAD(NULL, vadSize, READ_WRITE, FALSE);        // MEM_RESERVE vad (todo)
+    // createVAD(NULL, vadSize, READ_WRITE, TRUE);         // MEM_COMMIT vad (todo)
+    createVAD(NULL, vadSize, READ_WRITE, FALSE);        // MEM_RESERVE vad (todo)
 
     /************** TESTING *****************/
     testVA = leafVABlock;
@@ -1071,7 +1092,9 @@ faultAndAccessTest()
     for (int i = 0; i < virtualMemPages; i++) {
 
         faultStatus testStatus;
+
         bRes = commitVA(testVA, READ_WRITE, 1);     // commits with READ_ONLY permissions
+        // bRes = protectVA(testVA, READ_WRITE, 1);        // TODO
 
         //
         // Write->Trim->Access
@@ -2201,7 +2224,16 @@ closeHandles()
         
     }
 
+    bRes = CloseHandle(physicalPageHandle);
+
+    if (bRes != TRUE) {
+
+        PRINT_ERROR("Unable to close handle\n");
+        
+    }
+
     return (BOOLEAN)bRes;
+
 }
 
 
@@ -2296,6 +2328,20 @@ initializeVirtualMemory()
     //
 
     virtualMemPages = numPagesReturned * VM_MULTIPLIER;
+
+    //
+    // Verify sufficient PTE_INDEX_BITS allocated in PFN struct to represent the 
+    // entire prospective virtual address range
+    //
+
+    if ( (1 << PTE_INDEX_BITS) > virtualMemPages) {
+
+        PRINT_ERROR("Too many pages for current PTE index field in PFN bits. \n Unable to run program with current #defines\n");
+        exit(-1);
+        
+    }
+
+    PRINT_ALWAYS("Successfully returned %d pages, with a virtual memory space of %llu pages \n", NUM_PAGES, virtualMemPages);
 
     //
     // Initialize VA lists, consisting of AWE addresses for page contents
