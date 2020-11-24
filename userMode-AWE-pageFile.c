@@ -1251,7 +1251,7 @@ faultAndAccessTest()
         faultStatus testStatus;
         ULONG_PTR commitSize;
 
-        commitSize = GetTickCount() % 20;
+        commitSize = GetTickCount() % 5;
         // commitSize = 1;
 
         bRes = commitVA(testVA, READ_WRITE, commitSize);     // commits with READ_ONLY permissions
@@ -1271,6 +1271,7 @@ faultAndAccessTest()
         #ifdef TRADE_PAGES
 
             PRINT("Attempting to trade VA\n");
+
             tradeVA(testVA);
 
         #endif
@@ -1617,24 +1618,28 @@ DWORD WINAPI
 trimValidPTEThread(HANDLE terminationHandle) 
 {
 
+    ULONG_PTR numTrimmed;
+    HANDLE handleArray[2];
+
     //
     // Write out modified pages to pagefile until modified page list empty
     //
 
-    ULONG_PTR numTrimmed;
     numTrimmed = 0;
 
     //
     // Create local handle array
     //
 
-    HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
+
     handleArray[1] = wakeTrimHandle;
 
     while (TRUE) {
 
         DWORD retVal;
+        ULONG_PTR currNum;
+        DWORD index;
 
         //
         // Note: efficacy is tied to implementation of checkAvailablePages,
@@ -1647,16 +1652,16 @@ trimValidPTEThread(HANDLE terminationHandle)
 
         retVal = WaitForMultipleObjects(2, handleArray, FALSE, 200);
 
-        DWORD index = retVal - WAIT_OBJECT_0;
+        index = retVal - WAIT_OBJECT_0;
 
         if (index == 0) {
 
             PRINT_ALWAYS("trimPTEthread - numPTEs trimmed : %llu\n", numTrimmed);
+
             return 0;
 
         } 
 
-        ULONG_PTR currNum;
         currNum = trimValidPTEs();
 
         numTrimmed += currNum;
@@ -1671,6 +1676,14 @@ trimValidPTEThread(HANDLE terminationHandle)
 
 volatile BOOLEAN checkPages;
 
+/*
+ * Note: debugging thread/method used to troubleshoot pagefile
+ * deadlock
+ * 
+ * If CHECK_PFNs is toggled on, checkPageStatus thread functions to 
+ * check if PFNs are in non-modified state or occupying two separate
+ * spaces in the pagefile. 
+ */
 
 DWORD WINAPI
 checkPageStatusThread(HANDLE terminationHandle) 
@@ -1678,11 +1691,17 @@ checkPageStatusThread(HANDLE terminationHandle)
 
     while (TRUE) {
 
+        //
+        // If checkPages flag is toggled true (typically accomplished by
+        // pressing 'b' key)
+        //
+
         if (checkPages) {
 
             PPFNdata currPFN;
-
-            ULONG_PTR numPages = 0;
+            ULONG_PTR numPages;
+            
+            numPages = 0;
 
             for (int j = 0; j < numPagesReturned; j++) {
 
@@ -1690,50 +1709,76 @@ checkPageStatusThread(HANDLE terminationHandle)
 
                 acquireJLock(&currPFN->lockBits);
                 
-                if (currPFN->statusBits != MODIFIED) {
+                //
+                // Used to find PFN metadata for any PFNs that
+                // may not be in the modified state (to troubleshoot
+                // pagefile deadlocks)
+                //
 
-                    DebugBreak();
-
-                }
+                ASSERT(currPFN->statusBits == MODIFIED);
 
                 numPages++;
 
                 releaseJLock(&currPFN->lockBits);
+
             }
 
             PRINT_ALWAYS("numpages: %llu\n", numPages);
 
 
             #ifdef PAGEFILE_PFN_CHECK
-            PPageFileDebug currPF;
 
-            EnterCriticalSection(&pageFileLock);
+                //
+                // If PAGEFILE_PFN_CHECK is also defined, verify that no
+                // single PFN appears twice in the pagefile (indicating
+                // a freeing/allocating pf space issue)
+                //
 
-            for (int k = 0; k < PAGEFILE_PAGES; k++) {
+                PPageFileDebug currPF;
 
-                currPF = pageFileDebugArray + k;
+                EnterCriticalSection(&pageFileLock);
 
-                PPFNdata PFN;
-                PFN = currPF->currPFN;
+                //
+                // Loop through PF space to see which PFNs occupy pagefile
+                // slots
+                //
 
-                ULONG_PTR PFNindex;
-                PFNindex = PFN - PFNarray;
+                for (int k = 0; k < PAGEFILE_PAGES; k++) {
 
-                PPageFileDebug secondCurr;
-                PPFNdata secondCurrPFN;
+                    PPFNdata PFN;
+                    ULONG_PTR PFNindex;
+                    PPageFileDebug secondCurr;
 
-                for (int l = k + 1; l < PAGEFILE_PAGES - 1; l++) {
+                    //
+                    // Get current PF debug entry and derive PFN data
+                    //
 
-                    secondCurr = pageFileDebugArray + l;
+                    currPF = pageFileDebugArray + k;
 
-                    secondCurrPFN = secondCurr->currPFN;
+                    PFN = currPF->currPFN;
 
-                    ASSERT (memcmp(PFN, secondCurrPFN, sizeof(PFNdata) != 0) );
+                    PFNindex = PFN - PFNarray;
+
+                    PPFNdata secondCurrPFN;
+
+                    //
+                    // Loop through remaining entries to check for PFN re-occurance
+                    // (and thus sduplicate PF space)
+                    //
+
+                    for (int l = k + 1; l < PAGEFILE_PAGES - 1; l++) {
+
+                        secondCurr = pageFileDebugArray + l;
+
+                        secondCurrPFN = secondCurr->currPFN;
+
+                        ASSERT (memcmp(PFN, secondCurrPFN, sizeof(PFNdata) != 0) );
+
+                    }
+
                 }
 
-            }
-
-            LeaveCriticalSection(&pageFileLock);
+                LeaveCriticalSection(&pageFileLock);
 
             #endif
 
@@ -1769,6 +1814,7 @@ checkPageStatusThread(HANDLE terminationHandle)
     }
 
     return 0;
+
 }
 
 #endif
@@ -1777,8 +1823,16 @@ checkPageStatusThread(HANDLE terminationHandle)
 VOID
 initLinkHead(PLIST_ENTRY headLink)
 {
+
+    //
+    // Initialize headlink Flink and Blink
+    // to point to itself
+    //
+
     headLink->Flink = headLink;
+
     headLink->Blink = headLink;
+
 }
 
 
@@ -1806,6 +1860,11 @@ initListHead(PlistData headData)
 
     headData->count = 0;
 
+    //
+    // Create a newPagesEvent with manual reset flag true and 
+    // a false initial state
+    //
+
     pagesCreatedHandle = CreateEvent(NULL, TRUE, FALSE, NULL);
 
     if (pagesCreatedHandle == INVALID_HANDLE_VALUE) {
@@ -1823,9 +1882,14 @@ initListHead(PlistData headData)
 VOID 
 initListHeads(PlistData listHeadArray)
 {
-    // initialize free/standby/modified lists
+    //
+    // Initialize free/standby/modified, etc (up throughg active) lists
+    //
+
     for (int status = 0; status < ACTIVE; status++) {
+
         initListHead(&listHeadArray[status]);
+        
     }
 
 }
@@ -1839,7 +1903,9 @@ initVAList(PlistData VAListHead, ULONG_PTR numVAs)
     PVANode currNode;
     PVOID baseVA;
 
-
+    //
+    // Check params
+    //
 
     if (numVAs < 1) {
         PRINT_ERROR("[initVAList] Cannot initialize list of VAs with length 0\n");
@@ -1861,11 +1927,19 @@ initVAList(PlistData VAListHead, ULONG_PTR numVAs)
 
         extendedParameters.Handle = physicalPageHandle;
 
-        baseVA = VirtualAlloc2(NULL, NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &extendedParameters, 1);      // equiv to numVAs*PAGE_SIZE
+        //
+        // Allocate a VA block of size equiv to numVAs*PAGE_SIZE (using bit shift)
+        //
+
+        baseVA = VirtualAlloc2(NULL, NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE, &extendedParameters, 1); 
 
     #else
 
-        baseVA = VirtualAlloc(NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);      // equiv to numVAs*PAGE_SIZE
+        //
+        // Allocate a VA block of size equiv to numVAs*PAGE_SIZE (using bit shift)
+        //
+
+        baseVA = VirtualAlloc(NULL, numVAs << PAGE_SHIFT, MEM_RESERVE | MEM_PHYSICAL, PAGE_READWRITE);
 
     #endif
 
@@ -1919,7 +1993,12 @@ freeVAList(PlistData VAListHead)
     PLIST_ENTRY nextLinks;
     PVANode baseNode;
 
+    //
+    // Initialize baseNode to null and the current links to the flink of the listhead
+    //
+
     baseNode = NULL;
+
     currLinks = VAListHead->head.Flink;
 
     //
@@ -1992,8 +2071,10 @@ initEventList(PlistData eventListHead, ULONG_PTR numEvents)
     baseNode = VirtualAlloc(NULL, numEvents * sizeof(eventNode), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
     if (baseNode == NULL) {
+
         PRINT_ERROR("failed to alloc for baseNode handle\n")
         exit(-1);
+
     }
     
     for (int i = 0; i < numEvents; i++) {
@@ -2029,6 +2110,7 @@ freeEventList(PlistData eventListHead)
     PVOID baseAddress;
 
     baseAddress = NULL;
+
     currLinks = eventListHead->head.Flink;
 
     //
@@ -2036,10 +2118,11 @@ freeEventList(PlistData eventListHead)
     //
 
     while (currLinks != &eventListHead->head) {
+
+        BOOL bRes;
     
         currNode = CONTAINING_RECORD(currLinks, eventNode, links);
 
-        BOOL bRes;
         bRes = CloseHandle(currNode->event);
 
         if (bRes != TRUE){
@@ -2073,9 +2156,23 @@ VOID
 initVADList()
 {
 
-    InitializeCriticalSection(&VADWriteLock);
+    //
+    // Initialize "outer" VAD read lock (may be acquired alone to read,
+    // but not write data to VAD list)
+    //
 
     InitializeCriticalSection(&VADListHead.lock);
+
+    //
+    // Initialize "inner" VAD write lock (MUST be acquired in all cases
+    // AFTER the outer "read" lock in order to avoid AB/BA deadlock)
+    //
+
+    InitializeCriticalSection(&VADWriteLock);
+
+    //
+    // Initialize head link to point to itself and listhead count to zero
+    //
 
     initLinkHead(&VADListHead.head);
 
@@ -2086,12 +2183,14 @@ initVADList()
 VOID
 freeVADList(PlistData listHead)
 {
+
     PVADNode currNode;
     PLIST_ENTRY currLinks;
     PLIST_ENTRY nextLinks;
     PVOID baseAddress;
 
     baseAddress = NULL;
+
     currLinks = listHead->head.Flink;
 
     //
@@ -2101,23 +2200,40 @@ freeVADList(PlistData listHead)
     while (currLinks != &listHead->head) {
     
         BOOL bRes;
+        
+        //
+        // Derive node from links field via CONTAINING_RECORD
+        //
 
         currNode = CONTAINING_RECORD(currLinks, VADNode, links);
 
         nextLinks = currNode->links.Flink;
 
+        //
+        // Delete the VAD itself
+        //
+
         bRes = deleteVAD(currNode->startVA);
 
-        if (bRes != TRUE){
+        if (bRes != TRUE) {
 
             PRINT_ERROR("[freeVADList] Failed to delete VAD\n");
 
         }
 
-
         currLinks = nextLinks;
 
     }
+
+    //
+    // Delete VAD "write" lock
+    //
+
+    DeleteCriticalSection(&VADWriteLock);
+
+    //
+    // Delete VAD "Read" lock
+    //
 
     DeleteCriticalSection(&listHead->lock);
 
@@ -2270,11 +2386,21 @@ testRoutine()
 
     quitChar = 'a';
 
+    //
+    // If keyboarad input is either 'q' or 'f', begin program termination
+    //
+
     while (quitChar != 'q' && quitChar != 'f') {
 
         quitChar = (char) getchar();
 
         #ifdef CHECK_PFNS
+
+            //
+            // If CHECK_PFNs is toggled, 'b' keypress will toggle on
+            // checkpages thread (which helps debug pagefile space
+            // deadlocks)
+            //
 
             if (quitChar == 'b') {
 
@@ -2400,6 +2526,7 @@ initHandles()
         exit(-1);
 
     }
+
 }
 
 
@@ -2611,12 +2738,18 @@ VOID
 freeVirtualMemory()
 {
 
-    /******************* free allocated memory ***************/
+    //
+    // Virtual free all allocated memory blocks
+    //
+
     VirtualFree(leafVABlock, 0, MEM_RELEASE);
+
     VirtualFree(PFNarray, 0, MEM_RELEASE);
+
     VirtualFree(PTEarray, 0, MEM_RELEASE);
+
     VirtualFree(pageFileVABlock, 0, MEM_RELEASE);
-    DeleteCriticalSection(&pageFileLock);
+    
     VirtualFree(VADBitArray, 0, MEM_RELEASE);
 
     //
@@ -2630,8 +2763,11 @@ freeVirtualMemory()
     //
 
     freeVAList(&zeroVAListHead);
+
     freeVAList(&writeVAListHead);
+
     freeVAList(&readPFVAListHead);
+    
     freeVAList(&pageTradeVAListHead);
 
     #ifdef PAGEFILE_PFN_CHECK
