@@ -151,7 +151,7 @@ getPTE(void* virtualAddress)
 
     if (virtualAddress < leafVABlock || virtualAddress >= leafVABlockEnd) {
 
-        PRINT_ERROR("[getPTE] Not within allocated VA block \n");
+        PRINT("[getPTE] Not within allocated VA block \n");
         return NULL;
 
     }

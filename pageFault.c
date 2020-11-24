@@ -221,7 +221,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
         // to event list.
         //
 
-        if (transitionPFN->refCount == 0) {   
+        if (transitionPFN->refCount == 0) {  
 
             transitionPFN->readInProgEventNode = NULL;
 
@@ -290,9 +290,10 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
     
     //
     // Page is only dequeued from standby/modified if write in progress bit is zero
+    // AND refCount is zero (indicating no read is currently occuring or being completed)
     //
 
-    if (transitionPFN->writeInProgressBit == 0) {
+    if (transitionPFN->writeInProgressBit == 0 && transitionPFN->refCount == 0) {
 
         dequeueSpecificPage(transitionPFN);
 
@@ -471,11 +472,19 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     //
 
     newPTE.u1.ulongPTE = 0;
+
     newPTE.u1.tPTE.validBit = 0;
+
     newPTE.u1.tPTE.transitionBit = 1;
+
     newPTE.u1.tPTE.permissions = pageFileRWEpermissions;
 
+    //
+    // Calculate PFN index
+    //
+
     pageNum = freedPFN - PFNarray;
+
     newPTE.u1.tPTE.PFN = pageNum;
 
     writePTE(masterPTE, newPTE);
@@ -644,16 +653,20 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     // warning - "window" between MapUserPhysicalPages and VirtualProtect may result in a lack of permissions protection
 
-    
-    // assign VA to point at physical page, mirroring our local PTE change
+    //
+    // Assign VA to point at physical page, mirroring our local PTE change
+    //
+
     bResult = MapUserPhysicalPages(virtualAddress, 1, &pageNum);
 
     if (bResult != TRUE) {
         PRINT_ERROR("[pf PageFault] Kernel state issue: Error mapping user physical pages\n");
     }
 
+    //
+    // Update physical permissions of hardware PTE to match our software reference.
+    //
 
-    // update physical permissions of hardware PTE to match our software reference.
     bResult = VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[pageFileRWEpermissions], &oldPermissions);
 
     if (bResult != TRUE) {
@@ -684,7 +697,6 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // to event list.
     //    
     
-    SetEvent(readInProgEventNode->event);
 
     freedPFN->refCount--;
 
@@ -693,6 +705,10 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         freedPFN->readInProgEventNode = NULL;
 
         enqueueEvent(&readInProgEventListHead, readInProgEventNode);
+
+    } else {
+
+        SetEvent(readInProgEventNode->event);
 
     }
 
@@ -709,7 +725,10 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     releaseJLock(&freedPFN->lockBits);
     
-    // compiler writes out as indivisible store
+    //
+    // Compiler writes out as indivisible store
+    //
+    
     writePTE(masterPTE, newPTE);
 
     return SUCCESS;

@@ -37,6 +37,11 @@ PPageFileDebug pageFileDebugArray;
 ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
 #endif
 
+#ifdef CHECK_PFNS
+PULONG_PTR aPFNs;
+#endif
+
+
 // Execute-Write-Read (bit ordering)
 ULONG_PTR permissionMasks[] = { 0, readMask, (readMask | writeMask), (readMask | executeMask), (readMask | writeMask | executeMask) };
 
@@ -67,10 +72,6 @@ ULONG_PTR virtualMemPages;
 PULONG_PTR VADBitArray;
 
 BOOLEAN debugMode;                      // toggled by -v flag on cmd line
-
-#ifdef CHECK_PFNS
-PULONG_PTR aPFNs;
-#endif
 
 
 BOOL
@@ -586,7 +587,10 @@ zeroPageThread(HANDLE terminationHandle)
     int numZeroed = 0;
     int numWaited = 0;
 
-    // create local handle array
+    //
+    // Create local handle array
+    //
+
     HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
     handleArray[1] = freeListHead.newPagesEvent;
@@ -684,7 +688,10 @@ freePageTestThread(HANDLE terminationHandle)
     int numFreed = 0;
     int numWaited = 0;
 
-    // create local handle array
+    //
+    // Create local handle array
+    //
+
     HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
     handleArray[1] = zeroListHead.newPagesEvent;
@@ -731,11 +738,15 @@ freePageTestThread(HANDLE terminationHandle)
             }
 
             numWaited++;
+
             continue;
+
         }
+
         numFreed++;
 
     }
+
 }
 
 
@@ -955,9 +966,11 @@ modifiedPageWriter()
 
         PFNtoWrite->pageFileOffset = INVALID_BITARRAY_INDEX;
 
-
+        //
         // If the page has not since been faulted in, re-enqueue to modified list
         // (since page has been re-modified, i.e. write->write fault->trim)
+        //
+
         if (PFNtoWrite->statusBits != ACTIVE) {
 
             wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoWrite);
@@ -992,16 +1005,21 @@ modifiedPageWriter()
     PPTE currPTE;
     currPTE = PTEarray + PFNtoWrite->PTEindex;    
 
-
+    //
     // if PFN has not since been faulted in to active, enqueue to standby list
     // if it has been write faulted in, check the dirty bit
     //  - if it is set, clear the PF bit index
     //  - otherwise, continue
+    //
+
     if (PFNtoWrite->statusBits != ACTIVE && PFNtoWrite->remodifiedBit == 0) {
 
         ASSERT(currPTE->u1.hPTE.validBit != 1 && currPTE->u1.tPTE.transitionBit == 1);
 
-        // enqueue page to standby (since has not been redirtied)
+        //
+        // Enqueue page to standby (since has not been redirtied)
+        //
+
         enqueuePage(&standbyListHead, PFNtoWrite);
 
         PRINT(" - Moved page from modified -> standby (wrote out to PageFile successfully)\n");
@@ -1061,40 +1079,95 @@ faultAndAccessTest()
 
     PVOID testVA;
     BOOLEAN bRes;
+    ULONG_PTR vadSize;
+    PVADNode node;
+    PVOID vadStartVA;
+
+    //
+    // Initialize VAD startVA to a "dummy" value
+    //
+
+    vadStartVA = 0;
 
 
     PRINT_ALWAYS("Fault and access test\n");
 
-    // ULONG_PTR vadSize = virtualMemPages;
-    ULONG_PTR vadSize = 512;
     
-    // createVAD(NULL, vadSize, READ_WRITE, TRUE);         // MEM_COMMIT vad (todo)
-    createVAD(NULL, vadSize, READ_WRITE, FALSE);        // MEM_RESERVE vad (todo)
+    #ifdef COMMIT_VAD
+        
+        vadSize = numPagesReturned / 32;    // todo
+
+        //
+        // Create MEM_COMMIT VADs
+        //
+
+        node = createVAD(NULL, vadSize, READ_WRITE, TRUE);
+
+    #elif RESERVE_VAD
+
+        vadSize = virtualMemPages / 4;      // todo
+
+        //
+        // Create MEM_RESERVE VADs
+        //
+
+        node = createVAD(NULL, vadSize, READ_WRITE, FALSE);
+
+    #else
+
+        BOOLEAN randomVADType;
+
+        vadSize = numPagesReturned / 32;    // todo
+
+        //
+        // Pseudo-randomize distribution of MEM_RESERVE/MEM_COMMIT VADs
+        // via GetTickCount
+        //
+
+        randomVADType = (GetTickCount() % 2);
+
+        node = createVAD(NULL, vadSize, READ_WRITE, randomVADType);
+
+    #endif
+
+    //
+    // Use a try/except block to opportunistically get the 
+    // start VA from the node we've just created. This is used
+    // at the end of this routine to delete the VAD (only for testing
+    // purposes, with the full knowledge and understanding that it 
+    // could very well be deleted in either gap)
+    //
+
+    _try {
+
+        if (node != NULL && node->startVA != NULL) {
+
+            vadStartVA = node->startVA;
+
+        }        
+
+    } _except (EXCEPTION_EXECUTE_HANDLER) {
+
+        vadStartVA = NULL;
+
+    }
 
     /************** TESTING *****************/
+
     testVA = leafVABlock;
 
 
     /************* FAULTING in and WRITING/ACCESSING testVAs *****************/
 
-    // TODO
-
-    // bRes = commitVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);     // commits with READ_ONLY permissions
-    // protectVA(testVA, READ_WRITE, virtualMemPages << PAGE_SHIFT);   // converts to read write
-
-    // if (bRes != TRUE) {
-
-    //     PRINT("Unable to commit pages \n");
-
-    // }
-
-
     for (int i = 0; i < virtualMemPages; i++) {
 
         faultStatus testStatus;
+        ULONG_PTR commitSize;
 
-        bRes = commitVA(testVA, READ_WRITE, 1);     // commits with READ_ONLY permissions
-        // bRes = protectVA(testVA, READ_WRITE, 1);        // TODO
+        commitSize = GetTickCount() % 20;
+        // commitSize = 1;
+
+        bRes = commitVA(testVA, READ_WRITE, commitSize);     // commits with READ_ONLY permissions
 
         //
         // Write->Trim->Access
@@ -1110,15 +1183,15 @@ faultAndAccessTest()
 
         #ifdef TRADE_PAGES
 
-        PRINT("Attempting to trade VA\n");
-        tradeVA(testVA);
+            PRINT("Attempting to trade VA\n");
+            tradeVA(testVA);
 
         #endif
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
 
         //
-        // iterate to next VA
+        // Iterate to next VA
         //
         
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
@@ -1130,30 +1203,40 @@ faultAndAccessTest()
 
     PRINT("Trimming %llu pages, modified writing half of them\n", virtualMemPages);
 
-    // reset testVa
+    //
+    // Reset testVa to base of leaf address block
+    //
+
     testVA = leafVABlock;
 
     for (int i = 0; i < virtualMemPages; i++) {
 
-        // trim the VAs we have just tested (to transition, from active)
-        trimVA(testVA);
-        testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
+        //
+        // Trim the VAs we have just tested (to transition, from active)
+        //
 
+        trimVA(testVA);
+
+        testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
 
         #ifndef MULTITHREADING
 
-        // alternate calling modifiedPageWriter and zeroPageWriter
-        if (i % 2 == 0) {
+            //
+            // alternate calling modifiedPageWriter and zeroPageWriter
+            //
 
-            modifiedPageWriter();
+            if (i % 2 == 0) {
 
-        } 
+                modifiedPageWriter();
 
-        else {
-            
-            zeroPageWriter();
+            } 
 
-        }
+            else {
+                
+                zeroPageWriter();
+
+            }
+
         #endif
     
     }
@@ -1166,20 +1249,46 @@ faultAndAccessTest()
     for (int i = 0; i < virtualMemPages; i++) {
 
         faultStatus testStatus;
-        testStatus = accessVA(testVA, READ_WRITE);        // to TEST VAs
+
+        testStatus = accessVA(testVA, READ_WRITE);
 
         PRINT("tested (VA = %llu), return status = %u\n", (ULONG_PTR) testVA, testStatus);
+
+        //
+        // Increment testVA
+        //
+
         testVA = (void*) ( (ULONG_PTR) testVA + PAGE_SIZE);
+
     }
 
 
     /***************** DECOMMITTING AND CHECKING VAs **************/
 
     testVA = leafVABlock;
-    // bRes = decommitVA(testVA, virtualMemPages << PAGE_SHIFT);        // todo
-    bRes = decommitVA(testVA, 512 << PAGE_SHIFT);       // todo
 
-    deleteVAD(leafVABlock);
+
+
+    #ifdef COMMIT_VAD
+
+        decommitVA(testVA, vadSize << PAGE_SHIFT);
+
+    #elif RESERVE_VAD
+
+        decommitVA(testVA, virtualMemPages << PAGE_SHIFT);
+
+    #else
+
+        decommitVA(testVA, vadSize << PAGE_SHIFT);
+
+    #endif
+
+    //
+    // Opportunistically delete VAD that was initially created at the start of this
+    // function (if it has not already been freed)
+    //
+
+    deleteVAD(vadStartVA);
 
     return TRUE;
 
@@ -1250,7 +1359,6 @@ trimValidPTEs()
     ULONG_PTR numTrimmed;
     ULONG_PTR PTEsInRange;
     BOOLEAN trimActive;
-    
     ULONG_PTR numAvailablePages;
 
     trimActive = FALSE;
@@ -1422,12 +1530,17 @@ DWORD WINAPI
 trimValidPTEThread(HANDLE terminationHandle) 
 {
 
-    // write out modified pages to pagefile until modified page list empty
+    //
+    // Write out modified pages to pagefile until modified page list empty
+    //
+
     ULONG_PTR numTrimmed;
     numTrimmed = 0;
 
-    
-    // create local handle array
+    //
+    // Create local handle array
+    //
+
     HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
     handleArray[1] = wakeTrimHandle;
@@ -1464,6 +1577,7 @@ trimValidPTEThread(HANDLE terminationHandle)
     }
 
     return 0;
+
 }
 
 #ifdef CHECK_PFNS
@@ -2334,7 +2448,7 @@ initializeVirtualMemory()
     // entire prospective virtual address range
     //
 
-    if ( (1 << PTE_INDEX_BITS) > virtualMemPages) {
+    if ( ( (ULONG_PTR) 1 << PTE_INDEX_BITS) < virtualMemPages) {
 
         PRINT_ERROR("Too many pages for current PTE index field in PFN bits. \n Unable to run program with current #defines\n");
         exit(-1);

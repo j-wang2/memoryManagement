@@ -191,6 +191,21 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
             return NULL;
 
         }
+
+        //
+        // Update node's commit count to the number of pages initially allocated
+        //
+
+        newNode->commitCount = numPages;
+
+    } else {
+
+        //
+        // For a reserve vad, initialize commit count to zero
+        //
+
+        newNode->commitCount = 0;
+
     }
 
 
@@ -207,6 +222,8 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
             LeaveCriticalSection(&VADListHead.lock);
 
             free(newNode);
+
+            decommitPages(numPages);
 
             PRINT("[commitVAD] Unable to create new VAD node (address overlap)\n");
 
@@ -233,7 +250,9 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
 
             free(newNode);
 
-            PRINT("[commitVAD] Unable to create new VAD node (address overlap)\n");
+            decommitPages(numPages);
+
+            PRINT("[commitVAD] Unable to create new VAD node (insufficient space in VM range)\n");
 
             return NULL;
 
@@ -315,13 +334,13 @@ deleteVAD(void* VA)
 
     removeVAD = getVAD(VA);
 
-    if (removeVAD == NULL) {
+    if (removeVAD == NULL || removeVAD->deleteBit == 1) {
 
         LeaveCriticalSection(&VADWriteLock);
 
         LeaveCriticalSection(&VADListHead.lock);
 
-        PRINT("[deleteVAD] Provided VA does not correspond to any VAD\n");
+        PRINT("[deleteVAD] Provided VA does not correspond to any VAD or is already being deleted\n");
 
         return FALSE;
 
@@ -375,6 +394,22 @@ deleteVAD(void* VA)
     dequeueSpecificVAD(removeVAD);
 
     //
+    // If VAD is commit, assert that there are no remaining committed pages within it
+    //
+
+    if (removeVAD->commitBit) {
+
+        ASSERT(removeVAD->commitCount == 0);
+
+    }
+
+    // ULONG_PTR numDecommitted;
+
+    // numDecommitted = checkDecommitted(FALSE, getPTE(removeVAD->startVA), getPTE((ULONG_PTR)removeVAD->startVA + (removeVAD->numPages << PAGE_SHIFT) - 1));
+
+    // ASSERT(numDecommitted == removeVAD->numPages);
+
+    //
     // Exit critical sections in inverse order of acquisition
     // (release write lock first, then release list lock)
     //
@@ -382,6 +417,16 @@ deleteVAD(void* VA)
     LeaveCriticalSection(&VADWriteLock);
 
     LeaveCriticalSection(&VADListHead.lock);
+
+
+    ULONG_PTR bitIndex;
+
+    bitIndex = ((ULONG_PTR) removeVAD->startVA - (ULONG_PTR) leafVABlock) >> PAGE_SHIFT;
+    // startVA = (PVOID) ( (bitIndex << PAGE_SHIFT) + (ULONG_PTR) leafVABlock );
+
+    setBitRange(FALSE, bitIndex, removeVAD->numPages, VADBitArray );
+
+
 
     free(removeVAD);
 

@@ -20,24 +20,27 @@
 
 
 /*********** Testing macros ************/
-// #define CHECK_PFNS
+
+// #define COMMIT_VAD
+// #define RESERVE_VAD
+#define CHECK_PFNS
 // #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing
                                                 // program to run sans pagefile
-// #define PTE_CHANGE_LOG
-// #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
+#define PTE_CHANGE_LOG
+#define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
                                                 // for the pagefile that includes additional information
 #define AV_TEMP_TESTING                                // temporary workaround for PF due to app verifier
 #define TESTING_ZERO                                // toggles zero page thread
 #define TESTING_MODIFIED                            // toggles modified page writer thread
 #define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
 #define CONTINUOUS_FAULT_TEST
-// #define TRADE_PAGES
+// #define TRADE_PAGES                          // deprecated (page trading functionality not up to date with current program)
 
 
 /*********** number of physical memory pages to allocate (+ PF pages for total memory) **********/
 // #define NUM_PAGES 64
-// #define NUM_PAGES 512
-#define NUM_PAGES 2048
+#define NUM_PAGES 512
+// #define NUM_PAGES 2048
 // #define NUM_PAGES 512*8  
 // #define NUM_PAGES 640000
 
@@ -60,13 +63,14 @@
 
 
 /*********** pagefile macros ***************************/
-// #define PAGEFILE_PAGES 8                           // capacity of pagefile pages (+ NUM_PAGES for total memory)
-
 #define PAGEFILE_PAGES 512                          // capacity of pagefile pages (+ NUM_PAGES for total memory)
 #define PAGEFILE_SIZE PAGEFILE_PAGES*PAGE_SIZE      // total pagefile size 
 #define PAGEFILE_BITS 20                            // actually 2^19 currently
 #define INVALID_BITARRAY_INDEX 0xfffff              // 20 bits (MUST CORRESPOND TO PAGEFILE BITS)
 
+//
+// Defines granularity of PTE locking (does not have to be a factor of total pages)
+//
 
 #define PAGES_PER_LOCK 64
 

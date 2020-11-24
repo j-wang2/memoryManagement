@@ -192,6 +192,17 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
     reprocessPTE = FALSE;
 
     //
+    // If commitsize is zero, return immediately - nothing to be committed
+    //
+
+    if (commitSize == 0) {
+
+        PRINT("[commitVA] commit size of zero\n");
+        return FALSE;
+
+    }
+
+    //
     // Calculate endVA from startVA and commit size, with -1 for inclusivity
     // (use <= as condition). This is also consistent with calculation
     // in decommitVA and VAD create/delete
@@ -236,7 +247,9 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
     if (currVAD == NULL) {
 
         LeaveCriticalSection(&VADListHead.lock);
+
         PRINT("[commitVA] Requested commit startVA does not fall within a VAD\n");
+
         return FALSE;
 
     }
@@ -256,7 +269,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
     if (commitNum < numPages) {
 
         LeaveCriticalSection(&VADListHead.lock);
-        PRINT("[commitVA] Requested commit does not fall within a single VAD\n");
+        PRINT("[commitVA] Requested commit does not fall within a single VAD\n");  
         return FALSE;
 
     }
@@ -326,10 +339,26 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
             
         }
 
+        //
+        // Acquire VAD lock in order to increment commit count
+        //
+
+        EnterCriticalSection(&VADWriteLock);
+
+        currVAD->commitCount += currDecommitted;
+
+        //
+        // Assert that there are not more pages committed in the VAD
+        // than actual VM pages (would be a bookkeeping error)
+        //
+
+        ASSERT(currVAD->commitCount <= currVAD->numPages);
+
+        LeaveCriticalSection(&VADWriteLock);
+
         returnCommitPages = FALSE;
 
     }
-
 
     //
     // Acquire starting PTE lock and set lockHeld boolean flag to true
@@ -387,6 +416,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
             else if (tempPTE.u1.tPTE.transitionBit == 1) {
 
                 PPFNdata transPFN;
+
                 transPFN = PFNarray + tempPTE.u1.tPTE.PFN;
 
                 //
@@ -457,6 +487,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
             else if (tempPTE.u1.ulongPTE == 0 && currVAD->commitBit) {
 
                 tempPTE.u1.dzPTE.pageFileIndex = INVALID_BITARRAY_INDEX;
+
                 tempPTE.u1.dzPTE.permissions = RWEpermissions;
 
             } else {
@@ -510,6 +541,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         tempPTE.u1.dzPTE.pageFileIndex = INVALID_BITARRAY_INDEX;
 
         currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );                       // equiv to PTEindex*page_size
+
         PRINT("[commitVA] Committed PTE at VA %llx with permissions %d\n", (ULONG_PTR) currVA, RWEpermissions);
         
 
@@ -610,8 +642,11 @@ trimPTE(PPTE PTEaddress)
     // remodified and thus remodified bit must be set in addition to 
     // setting status bits to modified.
     //
+    // PFN refCount (as a proxy for any finishing reads), must also be checked
+    // similarly
+    //
 
-    if (PFNtoTrim->writeInProgressBit == 1 || PFNtoTrim->readInProgressBit == 1) {
+    if (PFNtoTrim->writeInProgressBit == 1 || PFNtoTrim->refCount != 0) {
 
         if (oldPTE.u1.hPTE.dirtyBit == 0) {
 
@@ -635,7 +670,11 @@ trimPTE(PPTE PTEaddress)
     }
     else {
 
-        ASSERT(PFNtoTrim->refCount == 0);
+        //
+        // If refCount is zero, readInProgress bit must also be zero
+        //
+
+        ASSERT(PFNtoTrim->readInProgressBit == 0);
 
         //
         // Check dirtyBit to see if page has been modified
@@ -929,7 +968,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
         LeaveCriticalSection(&VADListHead.lock);
 
-        PRINT_ALWAYS("[commitVA] Requested commit does not fall within a single VAD\n");
+        PRINT("[decommitVA] Requested decommit does not fall within a single VAD\n");
 
         return FALSE;
 
@@ -994,9 +1033,17 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
             #ifdef TESTING_VERIFY_ADDRESSES
 
-                if ((ULONG_PTR) currVA != * (ULONG_PTR*) currVA) {
+                //
+                // Single volatile snapshot of current value at currVA
+                //
 
-                    if (* (ULONG_PTR*) currVA == (ULONG_PTR)0) {
+                volatile ULONG_PTR compareVal;
+
+                compareVal = * (ULONG_PTR*) currVA;
+
+                if ((ULONG_PTR) currVA != compareVal) {
+
+                    if (compareVal == (ULONG_PTR)0) {
 
                         //
                         // This may occur if a thread attempts to decommit an address WHILE
@@ -1008,7 +1055,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
                     } else {
 
-                        PRINT_ERROR("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, * (ULONG_PTR*) currVA);
+                        PRINT_ERROR("decommitting (VA = 0x%llx) with contents 0x%llx\n", (ULONG_PTR) currVA, compareVal);
 
                     }    
                     
@@ -1029,13 +1076,14 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
             }
 
-
-            if (currPFN->writeInProgressBit == 1) {
+            if (currPFN->writeInProgressBit == 1 || currPFN->refCount != 0) {
 
                 currPFN->statusBits = AWAITING_FREE;
                 
             }
             else {
+
+                ASSERT(currPFN->readInProgressBit == 0);
 
                 //
                 // If the PFN contents are also stored in pageFile
@@ -1070,8 +1118,12 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
         } 
         else if (tempPTE.u1.tPTE.transitionBit == 1) {                  // transition format
 
-            // get PFN
             PPFNdata currPFN;
+
+            //
+            // Get PFN metadata
+            //
+
             currPFN = PFNarray + tempPTE.u1.tPTE.PFN;
 
             //
@@ -1108,12 +1160,16 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
             // Dequeue PFN only if both read in progress and write in progress bits are clear
             //
 
-            if (currPFN->writeInProgressBit == 1 || currPFN->readInProgressBit == 1) {
+            if (currPFN->writeInProgressBit == 1 || currPFN->refCount != 0) {       // todo
+
+            // if (currPFN->writeInProgressBit == 1 || currPFN->readInProgressBit == 1) {
 
                 currPFN->statusBits = AWAITING_FREE;
 
             }
             else {
+
+                ASSERT(currPFN->readInProgressBit == 0);
 
                 //
                 // Dequeue page from standby/modified list
@@ -1146,12 +1202,49 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
             tempPTE.u1.ulongPTE = 0;
 
             //
-            // If VAD is commit, set decommitBit in PTE
+            // If VAD is commit, set decommitBit in PTE and decrement the
+            // VAD's currently committed count
             //
             
             if (currVAD->commitBit) {
 
-                tempPTE.u1.dzPTE.decommitBit = 1;
+                //
+                // If VAD is not being deleted, set decommit bit and invalid 
+                // bitarray index
+                //
+
+                if (currVAD->deleteBit == 0) {
+
+                    tempPTE.u1.dzPTE.decommitBit = 1;
+
+                    tempPTE.u1.dzPTE.pageFileIndex = INVALID_BITARRAY_INDEX;
+
+                } else {
+
+                    //
+                    // If VAD deleteBit is set (for a commit VAD), set decommitbit and 
+                    // pagefile index to zero (zeroing whole PTE)
+                    //
+
+                    tempPTE.u1.dzPTE.decommitBit = 0;
+
+                    tempPTE.u1.dzPTE.pageFileIndex = 0;
+
+                    ASSERT(tempPTE.u1.ulongPTE == 0);
+
+                }
+
+                //
+                // Acquire VAD write lock to decrement commit count
+                //
+
+                EnterCriticalSection(&VADWriteLock);
+
+                ASSERT(currVAD->commitCount != 0);
+
+                currVAD->commitCount--;
+
+                LeaveCriticalSection(&VADWriteLock);
 
             }
 
@@ -1178,31 +1271,65 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
         }  
         else if (tempPTE.u1.pfPTE.pageFileIndex != INVALID_BITARRAY_INDEX
-                && tempPTE.u1.pfPTE.permissions != NO_ACCESS) {         // pagefile format
+                && tempPTE.u1.pfPTE.permissions != NO_ACCESS) {
+
+            //
+            // PTE is in pagefile format - clear pagefile space and zero PTE
+            //
 
             clearPFBitIndex(tempPTE.u1.pfPTE.pageFileIndex);
+
             tempPTE.u1.ulongPTE = 0;
 
         }
-        else if (tempPTE.u1.dzPTE.permissions != NO_ACCESS) {           // demand zero format
+        else if (tempPTE.u1.dzPTE.permissions != NO_ACCESS) {           
+            
+            //
+            //  PTE is in dz format - simply zero PTE
+            //
 
             tempPTE.u1.ulongPTE = 0;
 
         }
         else if (tempPTE.u1.dzPTE.decommitBit == 1) {
 
+            if (currVAD->commitBit && currVAD->deleteBit == 1) {
+
+                tempPTE.u1.dzPTE.decommitBit = 0;
+
+                tempPTE.u1.dzPTE.pageFileIndex = 0;
+
+                ASSERT(tempPTE.u1.ulongPTE == 0);
+
+            }
+
+            writePTE(currPTE, tempPTE);
+
             PRINT("[decommitVA] PTE has already been decommitted\n");
 
             continue;
 
         }
-        else if (tempPTE.u1.ulongPTE == 0 && currVAD->commitBit == 0) { // zero PTE
+        else if (tempPTE.u1.ulongPTE == 0 
+                && (currVAD->commitBit == 0 
+                || (currVAD->commitBit && currVAD->deleteBit) 
+                ) ) {                               
+
+            //
+            // IF PTE is zero AND the currVAD's commitBit is clear OR
+            // the currVad's deleteBit is set
+            //
             
             PRINT("[decommitVA] PTE has already been decommitted\n");
 
             continue;
 
-        }
+        } 
+        // else {
+            
+        //     PRINT_ERROR("[decommitVA] unrecognized state\n");
+
+        // }
 
 
         //
@@ -1215,12 +1342,43 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
         InterlockedDecrement64(&totalCommittedPages);
 
         //
-        // If VAD is commit, set decommitBit in PTE
+        // If VAD is commit, decrement the VAD's commit count
         //
         
         if (currVAD->commitBit) {
 
-            tempPTE.u1.dzPTE.decommitBit = 1;
+            //
+            // If the VAD has not yet been deleted, also set the decommitBit
+            // and invalid bitarray index in PTE
+            //
+
+            if (currVAD->deleteBit == 0) {
+
+                tempPTE.u1.dzPTE.decommitBit = 1;
+
+                tempPTE.u1.dzPTE.pageFileIndex = INVALID_BITARRAY_INDEX;
+
+            } else {
+
+                tempPTE.u1.dzPTE.decommitBit = 0;
+
+                tempPTE.u1.dzPTE.pageFileIndex = 0;
+
+                ASSERT(tempPTE.u1.ulongPTE == 0);
+
+            }
+
+            //
+            // VAD lock must be acquired/released to decrement count
+            //
+
+            EnterCriticalSection(&VADWriteLock);
+
+            ASSERT(currVAD->commitCount != 0);
+
+            currVAD->commitCount--;
+
+            LeaveCriticalSection(&VADWriteLock);
 
         }
 
@@ -1308,6 +1466,64 @@ commitPages (ULONG_PTR numPages)
 }
 
 
+
+BOOLEAN
+decommitPages (ULONG_PTR numPages)
+{
+
+    ULONG64 oldVal;
+    ULONG64 tempVal;
+
+    oldVal = totalCommittedPages;
+
+    while (TRUE) {
+
+        ASSERT( oldVal <= totalMemoryPageLimit);
+
+        
+        //
+        // Check for oldVAL + numpages wrapping
+        //
+
+        if (oldVal - numPages > oldVal) {
+
+            PRINT_ERROR("WRAPPING\n");
+            return FALSE;
+
+        }
+
+                
+        //
+        // Assert that page counts have been kept correctly
+        //
+
+        ASSERT (oldVal - numPages >= 0);
+
+        tempVal = InterlockedCompareExchange64(&totalCommittedPages, oldVal - numPages, oldVal);
+        
+        //
+        // Compare exchange successful
+        //
+
+        if (tempVal == oldVal) {
+
+            ASSERT(totalCommittedPages <= totalMemoryPageLimit);
+
+            return TRUE;
+
+        } else {
+
+            oldVal = tempVal;
+
+        }
+
+    }
+
+}
+
+
+
+
 ULONG_PTR
 checkDecommitted(BOOLEAN isVADCommit, PPTE startPTE, PPTE endPTE)
 {
@@ -1324,6 +1540,8 @@ checkDecommitted(BOOLEAN isVADCommit, PPTE startPTE, PPTE endPTE)
 
     for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
+        PTE tempPTE;
+
         //
         // Only acquire lock if the currentPTE is the first PTE OR
         // if current PTE's lock differs from the previous PTE's lock 
@@ -1338,16 +1556,20 @@ checkDecommitted(BOOLEAN isVADCommit, PPTE startPTE, PPTE endPTE)
         if (lockHeld == FALSE) {
 
             PRINT_ERROR("[commitVA] unable to acquire lock - fatal error\n");
-            return FALSE;
+            return 0;
 
         }
         
+        //
         // make a shallow copy/"snapshot" of the PTE to edit and check
-        PTE tempPTE;
+        //
+
         tempPTE = *currPTE;
 
         //
         // For a commit VAD, check if PTE is explicitly decommitted
+        // via the decommitBit (and assert that other fields remain
+        // as they should)
         //
 
         if (isVADCommit && 
@@ -1355,14 +1577,18 @@ checkDecommitted(BOOLEAN isVADCommit, PPTE startPTE, PPTE endPTE)
             && tempPTE.u1.tPTE.transitionBit == 0 
             && tempPTE.u1.dzPTE.decommitBit) ) {
 
+            ASSERT(tempPTE.u1.dzPTE.padding == 0 
+                    && tempPTE.u1.dzPTE.pageFileIndex == INVALID_BITARRAY_INDEX
+                    && tempPTE.u1.dzPTE.permissions == 0);
+
             numDecommitted++;
 
         }
 
         //
         // For a reserve VAD, check if PTE is decommitted
-        // (i.e. if valid/transition/demandzero bit is already clear)
-        // todo - does this change if the vad permissions around PTE change?
+        // (i.e. if valid/transition/demandzero bit is already clear
+        // and that decommit bit is not set
         //
 
         else if (isVADCommit == FALSE

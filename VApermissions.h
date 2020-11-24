@@ -95,6 +95,19 @@ BOOLEAN
 commitPages (ULONG_PTR numPages);
 
 
+BOOLEAN
+decommitPages (ULONG_PTR numPages);
+
+
+/*
+ * checkDecommitted: function to determine how many PTEs in a given 
+ * range have been committed
+ *  - takes BOOLEAN param isVadCommit, which determines whether to check
+ *    decommitBit in PTE
+ * 
+ * Returns ULONG_PTR
+ *  - Number of PTEs/Pages within range that are decommitted
+ */
 ULONG_PTR
 checkDecommitted(BOOLEAN isVADCommit, PPTE startPTE, PPTE endPTE);
 

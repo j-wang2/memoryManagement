@@ -8,32 +8,58 @@
 VOID
 acquireJLock(volatile PLONG lock)
 {
+
+    //
+    // Spin until InterlockedCompareExchange call is successful
+    //
+
     while (TRUE) {
 
         if (InterlockedCompareExchange(lock, 1, 0) == 0) {
+
+            //
+            // Return once call is successful
+            //
+
             return;
+
         }
+
     }
+
 }
 
 
 VOID
 releaseJLock(volatile PLONG lock)
 {
+
+    //
+    // Clear lock value
+    //
+
     *lock = 0;
+
     return;
+
 }
 
 
 BOOL
 tryAcquireJLock(volatile PLONG lock)
 {
+
     if (InterlockedCompareExchange(lock, 1, 0) == 0) {
+
         return TRUE;
+
     } 
     else {
+
         return FALSE;
+
     }
+
 }
 
 
@@ -58,7 +84,19 @@ initPTELocks(ULONG_PTR totalVirtualMemPages)
 {
 
     ULONG_PTR numLocks;
+
     numLocks = totalVirtualMemPages / PAGES_PER_LOCK;
+
+    //
+    // If integer division rounds number of locks down, increment by
+    // one to avoid error
+    //
+
+    if (totalVirtualMemPages % PAGES_PER_LOCK != 0) {
+
+        numLocks++;
+
+    }
 
     // 
     // Allocate a lock array corresponding to PTEs in pagetable
@@ -97,6 +135,17 @@ freePTELocks(PCRITICAL_SECTION LockArray, ULONG_PTR totalVirtualMemPages)
     }
 
     numLocks = totalVirtualMemPages / PAGES_PER_LOCK;
+
+    //
+    // If integer division rounds number of locks down, increment by
+    // one to avoid error
+    //
+
+    if (totalVirtualMemPages % PAGES_PER_LOCK != 0) {
+
+        numLocks++;
+
+    }
 
     for (int i = 0; i <= numLocks; i++) {
 
