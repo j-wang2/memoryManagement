@@ -244,7 +244,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
  
     currVAD = getVAD(startVA);
 
-    if (currVAD == NULL) {
+    if (currVAD == NULL || currVAD->deleteBit == 1) {
 
         LeaveCriticalSection(&VADListHead.lock);
 
@@ -1157,10 +1157,11 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
             }
             
             //
-            // Dequeue PFN only if both read in progress and write in progress bits are clear
+            // Dequeue PFN only if both write in progress bit is clear AND refCount is 
+            // zero (as a proxy for read in progress)
             //
 
-            if (currPFN->writeInProgressBit == 1 || currPFN->refCount != 0) {       // todo
+            if (currPFN->writeInProgressBit == 1 || currPFN->refCount != 0) {
 
             // if (currPFN->writeInProgressBit == 1 || currPFN->readInProgressBit == 1) {
 
@@ -1325,11 +1326,13 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
             continue;
 
         } 
-        // else {
+        else if (tempPTE.u1.ulongPTE != 0) {
             
-        //     PRINT_ERROR("[decommitVA] unrecognized state\n");
+            PRINT_ERROR("[decommitVA] unrecognized state\n");
 
-        // }
+            continue;
+
+        }
 
 
         //

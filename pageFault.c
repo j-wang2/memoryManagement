@@ -517,7 +517,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     
     #else
 
-        signature = NULL;
+        signature = 0;
 
     #endif
 
@@ -642,11 +642,16 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     }
 
+    //
+    // Transfer permissions bit from pfPTE, if it exists
+    //
 
-    // transfer permissions bit from pfPTE, if it exists
     transferPTEpermissions(&newPTE, pageFileRWEpermissions);
 
+    //
     // put PFN's corresponding pageNum into PTE
+    //
+
     newPTE.u1.hPTE.PFN = pageNum;
 
     DWORD oldPermissions;
@@ -660,7 +665,9 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     bResult = MapUserPhysicalPages(virtualAddress, 1, &pageNum);
 
     if (bResult != TRUE) {
+
         PRINT_ERROR("[pf PageFault] Kernel state issue: Error mapping user physical pages\n");
+
     }
 
     //
@@ -670,7 +677,9 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     bResult = VirtualProtect(virtualAddress, PAGE_SIZE, windowsPermissions[pageFileRWEpermissions], &oldPermissions);
 
     if (bResult != TRUE) {
+
         PRINT_ERROR("[pf PageFault] Kernel state issue: Error virtual protecting VA with permissions %u\n", pageFileRWEpermissions);
+
     }
 
     acquireJLock(&freedPFN->lockBits);
@@ -696,7 +705,6 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // readInProg node from the PFN field and re-enqueue
     // to event list.
     //    
-    
 
     freedPFN->refCount--;
 
@@ -900,6 +908,10 @@ checkVADPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
     currVAD = getVAD(virtualAddress);
 
+    //
+    // If VAD is non-existent, reserve, or deleted, return an access violation
+    //
+
     if (currVAD == NULL || currVAD->commitBit == 0 || currVAD->deleteBit) {
 
         LeaveCriticalSection(&VADWriteLock);
@@ -964,6 +976,41 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     //
 
     acquirePTELock(currPTE);
+
+    //TODO CHECK
+
+    PVADNode currVAD;
+
+    //
+    // Get VAD "write" lock (acquiring the other VAD lock causes
+    // AB-BA deadlock issue with PTE lock, since PTE lock is acquired 
+    // AFTER VAD "read" lock in commit/decommit)
+    //
+
+    EnterCriticalSection(&VADWriteLock);
+
+    currVAD = getVAD(virtualAddress);
+
+    //
+    // If VAD is non-existent, reserve, or deleted, return an access violation
+    //
+
+    if (currVAD == NULL || currVAD->deleteBit) {
+
+        LeaveCriticalSection(&VADWriteLock);
+        releasePTELock(currPTE);
+
+        PRINT("[checkVADPageFault] VA does not correspond to a VAD\n");
+
+        return ACCESS_VIOLATION;
+
+    }
+    
+    //
+    // Release lock during duration of demand zero fault
+    //
+
+    LeaveCriticalSection(&VADWriteLock);
 
     //
     // Make a shallow copy/"snapshot" of the PTE to edit and check

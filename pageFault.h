@@ -6,10 +6,10 @@
 
 /*
  * pageFault: function to simulate and handle a pagefault
- * function
+ *  - Calls encompassing functions (i.e. pfPagefault, dzPagefault, etc)
  *  - gets page given a VA
  *  - if PTE exists, return SUCCESS
- *  - otherweise, dequeue from freed list and return pointer to PFN entry 
+ *  - otherwise, dequeue from freed list and return pointer to PFN entry 
  * 
  * Returns faultStatus:
  *  - SUCCESS on successful 

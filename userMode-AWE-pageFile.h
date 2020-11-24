@@ -27,12 +27,12 @@
 // #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing
                                                 // program to run sans pagefile
 #define PTE_CHANGE_LOG
-#define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
+// #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
                                                 // for the pagefile that includes additional information
 #define AV_TEMP_TESTING                                // temporary workaround for PF due to app verifier
 #define TESTING_ZERO                                // toggles zero page thread
 #define TESTING_MODIFIED                            // toggles modified page writer thread
-#define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
+// #define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
 #define CONTINUOUS_FAULT_TEST
 // #define TRADE_PAGES                          // deprecated (page trading functionality not up to date with current program)
 

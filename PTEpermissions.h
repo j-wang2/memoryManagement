@@ -21,11 +21,18 @@ typedef struct _PTETrace {
 
 } PTETrace, *PPTETrace;
 
+//
+// PTEHistoryLog - array of PTETraces used for debugging purposes should
+// PTE_CHANGE_LOG be toggled on
+//
 
-// PTEHistoryLog - array of PTETrace's used for debugging purposes
 PTETrace PTEHistoryLog[LOG_ARRAY_SIZE];
 
-// current index in the log
+//
+// Current index in the log (inclusive, meaning that this index is most 
+// current)
+//
+
 LONG currLogIndex; 
 
 /*

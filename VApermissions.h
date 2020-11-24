@@ -91,10 +91,28 @@ BOOLEAN
 decommitVA (PVOID startVA, ULONG_PTR commitSize);
 
 
+/*
+ * commitPages: function to increment the global commit count
+ * by param numPages pages
+ * 
+ * Returns BOOLEAN
+ *  - TRUE if could be successfully allocated
+ *  - FALSE if wrap or no remaining pages
+ * 
+ */
 BOOLEAN
 commitPages (ULONG_PTR numPages);
 
 
+/*
+ * decommitPages: function to decrement global commit count by param
+ * numPages pages
+ * 
+ * Returns BOOLEAN
+ *  - TRUE if successful
+ *  - FALSE if wrapping error
+ * 
+ */
 BOOLEAN
 decommitPages (ULONG_PTR numPages);
 

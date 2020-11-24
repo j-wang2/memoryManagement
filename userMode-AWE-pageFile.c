@@ -584,15 +584,24 @@ DWORD WINAPI
 zeroPageThread(HANDLE terminationHandle)
 {
 
-    int numZeroed = 0;
-    int numWaited = 0;
+    int numZeroed;
+    int numWaited;
+    HANDLE handleArray[2];
+
+    //
+    // Initialize numZeroed/waited counters to zero
+    //
+
+    numZeroed = 0;
+
+    numWaited = 0;
 
     //
     // Create local handle array
     //
 
-    HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
+
     handleArray[1] = freeListHead.newPagesEvent;
 
     //
@@ -653,6 +662,11 @@ freePageTestWriter()
 {
 
     PPFNdata PFNtoFree;
+    
+    //
+    // Dequeue page from zero list to enqueue to free list
+    //
+
     PFNtoFree = dequeueLockedPage(&zeroListHead, FALSE);
 
     if (PFNtoFree == NULL) {
@@ -666,11 +680,19 @@ freePageTestWriter()
 
     #ifdef PAGEFILE_PFN_CHECK
 
+        //
+        // Simplified version of enqueuePage, only used for 
+        // when pagefile PFNs are checked
+        //
+
         enqueuePageBasic(&freeListHead, PFNtoFree);
 
     #else
 
+        //
         // enqueue to freeList (updates status bits in PFN metadata)
+        //
+
         enqueuePage(&freeListHead, PFNtoFree);
 
     #endif
@@ -685,15 +707,24 @@ DWORD WINAPI
 freePageTestThread(HANDLE terminationHandle)
 {
 
-    int numFreed = 0;
-    int numWaited = 0;
+    int numFreed;
+    int numWaited;
+    HANDLE handleArray[2];
+
+    //
+    // Initialize numFreed/Waited counters to zero
+    //
+
+    numFreed = 0;
+
+    numWaited= 0;
 
     //
     // Create local handle array
     //
 
-    HANDLE handleArray[2];
     handleArray[0] = terminationHandle;
+    
     handleArray[1] = zeroListHead.newPagesEvent;
 
     //
@@ -788,6 +819,7 @@ modifiedPageWriter()
 
     BOOLEAN wakeModifiedWriter;
     PPFNdata PFNtoWrite;
+    BOOLEAN bResult;
 
     wakeModifiedWriter = FALSE;
 
@@ -839,14 +871,29 @@ modifiedPageWriter()
 
     releaseJLock(&PFNtoWrite->lockBits);
 
+
+    //
+    // If address verification is enabled (asserts that the contents
+    // of a given page corresponds to the virtual address it is mapped
+    // or standby at)
+    //
+
     ULONG_PTR expectedSig;
-    expectedSig = (ULONG_PTR) leafVABlock + ( ( PFNtoWrite->PTEindex ) << PAGE_SHIFT );
+
+    #ifdef TESTING_VERIFY_ADDRESSES
+
+        expectedSig = (ULONG_PTR) leafVABlock + ( ( PFNtoWrite->PTEindex ) << PAGE_SHIFT );
+
+    #else 
+
+        expectedSig = 0;
+
+    #endif
 
     //
     // Write page to pagefile - can no longer be accessed since write in progress is set
     //
 
-    BOOLEAN bResult;
     bResult = writePageToFileSystem(PFNtoWrite, expectedSig);
 
     //
@@ -864,7 +911,7 @@ modifiedPageWriter()
     ASSERT (PFNtoWrite->statusBits != FREE && PFNtoWrite->statusBits != ZERO);
 
     //
-    // Clear write in progress bit (since page has been written)
+    // Clear write in progress bit (since page write has completed)
     //
 
     ASSERT(PFNtoWrite->writeInProgressBit == 1);
@@ -1038,38 +1085,78 @@ DWORD WINAPI
 modifiedPageThread(HANDLE terminationHandle)
 {
 
-    int numWrittenOut = 0;
-    int numWaited = 0;
-
-    // create local handle array
+    int numWrittenOut;
+    int numWaited;
     HANDLE handleArray[2];
+
+    //
+    // Initialize numwrittenout/waited to zero
+    //
+
+    numWrittenOut = 0;
+
+    numWaited = 0;
+
+    //
+    // Create local handle array derived from termination handle param as well
+    // as the wakeModifiedWRiter handle
+    //
+
     handleArray[0] = terminationHandle;
+
     handleArray[1] = wakeModifiedWriterHandle;
 
+    //
+    // Write out modified pages to pagefile until modified page list empty
+    // or termination event is set
+    //
 
-
-    // write out modified pages to pagefile until modified page list empty
     while (TRUE) {
 
         BOOLEAN bres;
+
+        //
+        // Returns FALSE on failure
+        //
+
         bres = modifiedPageWriter();
 
         if (bres == FALSE) {
 
-            DWORD retVal = WaitForMultipleObjects(2, handleArray, FALSE, 1000);
-            DWORD index = retVal - WAIT_OBJECT_0;
+            DWORD retVal;
+            DWORD index;
+
+            //
+            // Wait for either handle to be set
+            //
+            
+            retVal = WaitForMultipleObjects(2, handleArray, FALSE, 1000);
+
+            index = retVal - WAIT_OBJECT_0;
+            
+            //
+            // If termination event is set, print a status update and return to caller,
+            // exiting the working thread
+            //
 
             if (index == 0) {
+
                 PRINT_ALWAYS("modifiedPageThread - numPages moved to standby list: %d, numWaited : %d \n", numWrittenOut, numWaited);
+
                 return 0;
+
             }
 
             numWaited++;
+
             continue;
+
         }
+
         numWrittenOut++;
 
     }
+
 }
 
 
