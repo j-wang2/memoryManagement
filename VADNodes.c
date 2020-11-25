@@ -405,11 +405,12 @@ deleteVAD(void* VA)
     // If VAD is commit, assert that there are no remaining committed pages within it
     //
 
-    if (removeVAD->commitBit) {
-            //todo - include reserve vad now that commit is maintained
-        ASSERT(removeVAD->commitCount == 0);
+    if (removeVAD->commitBit == 0) {
+        
+        ASSERT(removeVAD->commitCount == 0);    // todo
 
     }
+
 
     // ULONG_PTR numDecommitted;        // todo
 
@@ -484,6 +485,12 @@ checkVADCommit(PVADNode currVAD)
     }
 
 #if 1
+
+    //
+    // VAD "read" lock MUST be held by caller so currVAD can be passed and read 
+    // accurately as a parameter to checkDecommitted
+    //
+
     numDecommitted = checkDecommitted(currVAD, startPTE, endPTE);
 #else
     numDecommitted = checkDecommitted( (BOOLEAN)currVAD->commitBit, startPTE, endPTE);
@@ -493,5 +500,45 @@ checkVADCommit(PVADNode currVAD)
     numCommitted = currVAD->numPages - numDecommitted;
 
     ASSERT(numCommitted == currVAD->commitCount);
+
+}
+
+
+VOID
+decrementCommit(PVADNode currVAD)
+{
+    
+    //
+    // Acquire and release VAD write lock to decrement commit count
+    //
+
+    EnterCriticalSection(&VADWriteLock);
+
+    ASSERT(currVAD->commitCount != 0);
+
+    currVAD->commitCount--;
+
+    LeaveCriticalSection(&VADWriteLock);
+
+    #ifdef VAD_COMMIT_CHECK
+
+        //
+        // VAD read lock must remain held at this point so that 
+        // currVAD can be read accurately by callee commit
+        // checks
+        //
+    
+        checkVADCommit(currVAD);
+
+    #endif
+    
+    //
+    // Decrement global committed page count regardless of whether VAD is 
+    // commit or reserve
+    //
+
+    ASSERT(totalCommittedPages != 0);
+
+    InterlockedDecrement64(&totalCommittedPages);
 
 }

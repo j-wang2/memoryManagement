@@ -1184,7 +1184,7 @@ faultAndAccessTest()
         
         // vadSize = numPagesReturned / 32;    // todo
 
-        // vadSize = GetTickCount() % numPagesReturned;
+        vadSize = GetTickCount() % numPagesReturned;
 
         //
         // Create MEM_COMMIT VADs
@@ -1209,9 +1209,9 @@ faultAndAccessTest()
 
         BOOLEAN randomVADType;
 
-        vadSize = numPagesReturned / 32;    // todo
+        // vadSize = numPagesReturned / 32;    // todo
 
-        // vadSize = GetTickCount() %  numPagesReturned;
+        vadSize = GetTickCount() %  numPagesReturned;
 
         //
         // Pseudo-randomize distribution of MEM_RESERVE/MEM_COMMIT VADs

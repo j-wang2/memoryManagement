@@ -298,10 +298,18 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         if (bRes == FALSE) {
 #if 1
 
+            //
+            // VAD "read" lock is held here so currVAD can be passed and read 
+            // accurately as a parameter to checkDecommitted
+            //
+
             currDecommitted = checkDecommitted(currVAD, startPTE, endPTE);
 #else
-            currDecommitted = checkDecommitted(FALSE, startPTE, endPTE);
+
+            currDecommitted = checkDecommitted(FALSE, startPTE, endPTE);        // todo
+
 #endif
+
             bRes = commitPages(currDecommitted);
 
             if (bRes == FALSE) {
@@ -349,7 +357,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
             // than actual VM pages (would be a bookkeeping error)
             //
 
-            // ASSERT(currVAD->commitCount <= currVAD->numPages);   // todo
+            ASSERT(currVAD->commitCount <= currVAD->numPages);   // todo (does this mess with ommit counts)
 
             LeaveCriticalSection(&VADWriteLock);
 
@@ -368,6 +376,12 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         ULONG_PTR currDecommitted;
 
 #if 1
+
+        //
+        // VAD "read" lock remains held here. CurrVAD can be passed and read 
+        // accurately as a parameter to checkDecommitted
+        //
+
         currDecommitted = checkDecommitted(currVAD, startPTE, endPTE);
 
 #else 
@@ -402,6 +416,10 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         ASSERT(currVAD->commitCount <= currVAD->numPages);
 
         LeaveCriticalSection(&VADWriteLock);
+
+        //
+        // Since VAD is mem commit, set return commit pages flag to false
+        //
 
         returnCommitPages = FALSE;
 
@@ -446,7 +464,8 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         // Check whether PTE has previously been committed
         // (i.e. whether valid/transition/demandzero bit is already set 
         // OR if the PTE is zero but the VAD is committed
-        // (avoids double charging commit)
+        // (avoids double charging commit). Delete bit cannot be set in
+        // VAD since it was validated earlier in the function
         //
 
         if (tempPTE.u1.hPTE.validBit == 1 
@@ -514,32 +533,12 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
                 // PTE has previously been committed, VAD is reserve,
                 // AND returnCommittedPages is TRUE, return charge
                 // (Must occur within if statement since trans PTE
-                // does not "fall through").
+                // does not "fall through" like other PTE statements).
                 //
 
                 if (currVAD->commitBit == 0 && returnCommitPages) {
                     
-                    //
-                    // "Return" (decrement) count of committed pages
-                    //
-
-                    ASSERT(totalCommittedPages > 0);
-
-                    InterlockedDecrement64(&totalCommittedPages);
-
-                    EnterCriticalSection(&VADWriteLock);
-
-                    ASSERT(currVAD->commitCount != 0);
-
-                    currVAD->commitCount--;
-
-                    LeaveCriticalSection(&VADWriteLock);
-
-                    #ifdef VAD_COMMIT_CHECK
-                    
-                        checkVADCommit(currVAD);
-
-                    #endif
+                    decrementCommit(currVAD);
 
                 }
 
@@ -574,27 +573,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
 
             if (currVAD->commitBit == 0 && returnCommitPages) {
                 
-                //
-                // "Return" (decrement) count of committed pages
-                //
-
-                ASSERT(totalCommittedPages > 0);
-
-                InterlockedDecrement64(&totalCommittedPages);
-
-                EnterCriticalSection(&VADWriteLock);
-
-                ASSERT(currVAD->commitCount != 0);
-
-                currVAD->commitCount--;
-
-                LeaveCriticalSection(&VADWriteLock);
-
-                #ifdef VAD_COMMIT_CHECK
-                
-                    checkVADCommit(currVAD);
-
-                #endif
+                decrementCommit(currVAD);
 
             }
             
@@ -609,7 +588,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         // since it must have been set to hit this path
         //
 
-        if (currVAD->commitBit) {
+        if (currVAD->commitBit && currVAD->deleteBit == 0) {
 
             ASSERT( tempPTE.u1.dzPTE.decommitBit == 1 );
 
@@ -1072,6 +1051,8 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
     for (currPTE = startPTE; currPTE <= endPTE; currPTE++ ) {
 
+        PTE tempPTE;
+
         currVA = (PVOID) ( (ULONG_PTR) startVA + ( (currPTE - startPTE) << PAGE_SHIFT ) );  // equiv to PTEindex*page_size
 
         //
@@ -1095,11 +1076,10 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
         // Make a shallow copy/"snapshot" of the PTE to edit and check
         //
 
-        PTE tempPTE;
         tempPTE = *currPTE;
 
         //
-        // Check if valid/transition/demandzero bit  is already set (avoids double charging if transition)
+        // Check if valid/transition/demandzero bit us set (meaning PTE is committed)
         //
 
         if (tempPTE.u1.hPTE.validBit == 1) {                            // valid/hardware format
@@ -1331,32 +1311,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
             releaseJLock(&currPFN->lockBits);
 
-            //
-            // Acquire VAD write lock to decrement commit count
-            //
-
-            EnterCriticalSection(&VADWriteLock);
-
-            ASSERT(currVAD->commitCount != 0);
-
-            currVAD->commitCount--;
-
-            LeaveCriticalSection(&VADWriteLock);    // todo - location? above or below release of jlock
-
-            #ifdef VAD_COMMIT_CHECK
-            
-                checkVADCommit(currVAD);
-
-            #endif
-            
-            //
-            // Decrement committed pages regardless of whether VAD is 
-            // commit or reserve
-            //
-
-            ASSERT(totalCommittedPages > 0);
-
-            InterlockedDecrement64(&totalCommittedPages);
+            decrementCommit(currVAD);
 
             continue;
 
@@ -1387,6 +1342,12 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
             if (currVAD->commitBit && currVAD->deleteBit == 1) {
 
+                //
+                // If a commit VAD is currently being deleted, clear the whole 
+                // PTE for next use (even though a clear PTE would typically
+                // be "committed" in a commit VAD)
+                //
+
                 tempPTE.u1.dzPTE.decommitBit = 0;
 
                 tempPTE.u1.dzPTE.pageFileIndex = 0;
@@ -1408,8 +1369,8 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
                 ) ) {                               
 
             //
-            // IF PTE is zero AND the currVAD's commitBit is clear OR
-            // the currVad's deleteBit is set
+            // If PTE is zero AND the VAD is mem reserve OR
+            // the VAD is mem commit AND the deleteBit is set
             //
             
             PRINT("[decommitVA] PTE has already been decommitted\n");
@@ -1423,12 +1384,18 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
             continue;
 
-        } else {
-            // PRINT_ERROR("what is this");        // TODO
+        } else if (!(tempPTE.u1.ulongPTE == 0 && currVAD->commitBit) ) {
+
+            //
+            // only remainingcase w validity is zero PTE with a commit VAD is committed
+            //
+
+            PRINT_ERROR("what is this");        // TODO
         }
 
         //
-        // If VAD is commit, decrement the VAD's commit count
+        // If VAD is commit, either set the decommit bit (if VAD deletebit is clear)
+        // OR clear the whole PTE
         //
         
         if (currVAD->commitBit) {
@@ -1462,35 +1429,8 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
 
         writePTE(currPTE, tempPTE);
 
-        
-        //
-        // Decrement committed pages regardless of whether VAD is 
-        // commit or reserve
-        //
+        decrementCommit(currVAD);
 
-        ASSERT(totalCommittedPages > 0);
-
-        InterlockedDecrement64(&totalCommittedPages);
-
-        //
-        // VAD lock must be acquired/released to decrement count
-        //
-
-        EnterCriticalSection(&VADWriteLock);
-
-        ASSERT(currVAD->commitCount != 0);
-
-        currVAD->commitCount--;
-
-        LeaveCriticalSection(&VADWriteLock);
-
-        #ifdef VAD_COMMIT_CHECK
-        
-            checkVADCommit(currVAD);
-
-        #endif
-
-   
     }
 
     //
@@ -1498,6 +1438,10 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
     //
 
     releasePTELock(endPTE);
+
+    //
+    // VAD "read" lock can now also be released
+    //
 
     LeaveCriticalSection(&VADListHead.lock);
 
@@ -1625,6 +1569,7 @@ decommitPages (ULONG_PTR numPages)
 
 
 #if 1
+
 ULONG_PTR
 checkDecommitted(PVADNode currVAD, PPTE startPTE, PPTE endPTE)
 {
@@ -1675,8 +1620,9 @@ checkDecommitted(PVADNode currVAD, PPTE startPTE, PPTE endPTE)
 
         if (currVAD->commitBit && 
             (tempPTE.u1.hPTE.validBit == 0 
-            && tempPTE.u1.tPTE.transitionBit == 0 
-            && (tempPTE.u1.dzPTE.decommitBit || ( currVAD->deleteBit && tempPTE.u1.ulongPTE == 0 )
+                && tempPTE.u1.tPTE.transitionBit == 0 
+                && (tempPTE.u1.dzPTE.decommitBit 
+                    || ( currVAD->deleteBit && tempPTE.u1.ulongPTE == 0 )
             ) ) ) {
 #if 0
             ASSERT(tempPTE.u1.dzPTE.padding == 0 

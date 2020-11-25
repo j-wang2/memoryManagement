@@ -93,4 +93,17 @@ VOID
 checkVADCommit(PVADNode currVAD);
 
 
+/*
+ * decrementCommit: function to decrement both VAD and global commit charge
+ *  - VAD "read" lock must be held by caller (since VAD is read)
+ *  - VAD "write" lock is also acquired and released within this function
+ *    in order to modify vad commit count
+ *  - global count is decremented via interlocked synchro ( no need for locking)
+ * 
+ * No return val
+ * 
+ */
+VOID
+decrementCommit(PVADNode currVAD);
+
 #endif

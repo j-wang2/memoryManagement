@@ -58,10 +58,16 @@ validPageFault(PTEpermissions RWEpermissions, PTE snapPTE, PPTE masterPTE)
 
         if (PFN->writeInProgressBit == 0) {
 
-            // free PF location
+            //
+            // Free pagefile space
+            //
+
             clearPFBitIndex(PFN->pageFileOffset);
 
-            // clear pagefile pointer out of PFN
+            //
+            // Clear pagefile pointer out of PFN
+            //
+
             PFN->pageFileOffset = INVALID_BITARRAY_INDEX;
 
         }         
@@ -227,6 +233,34 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
 
             enqueueEvent(&readInProgEventListHead, currEventNode);
 
+            //
+            // If current thread was last waiting thread, the page was 
+            // not enqueued to a list. Therefore, this fault must re-enqueue
+            // the page in accordance with status bits.
+            //
+
+            if (transitionPFN->statusBits == AWAITING_FREE) {
+
+                releaseAwaitingFreePFN(transitionPFN);
+
+            } else if (transitionPFN->statusBits == MODIFIED
+                       || (transitionPFN->statusBits == STANDBY && transitionPFN->remodifiedBit) ) {
+
+                //
+                // Clear remodified bit and enqueue to standby list
+                // todo - check this case (standby & remodified)
+                //
+
+                transitionPFN->remodifiedBit = 0;
+
+                enqueuePage(&modifiedListHead, transitionPFN);
+
+            } else if (transitionPFN->statusBits == STANDBY) {
+
+                enqueuePage(&standbyListHead, transitionPFN);
+
+            }
+
         }
 
         releaseJLock(&transitionPFN->lockBits);
@@ -368,6 +402,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     ULONG_PTR PTEindex;
     BOOL bResult;
     BOOL clearIndex;
+    PeventNode readInProgEventNode;
 
     clearIndex = FALSE;
 
@@ -393,7 +428,6 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     // remains held, which could be improved in future optimizations)
     //
 
-    PeventNode readInProgEventNode;
     readInProgEventNode = dequeueLockedEvent(&readInProgEventListHead);
 
     while (readInProgEventNode == NULL) {
@@ -555,14 +589,14 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
         freedPFN->readInProgressBit = 0;
         
-        SetEvent(readInProgEventNode->event);
+        SetEvent(readInProgEventNode->event);       // todo - holding lock while setting event
 
         freedPFN->refCount--;
 
         //
         // If current thread is the last waiting thread, clear the 
         // readInProg node from the PFN field and re-enqueue
-        // to event list.
+        // to event list. Also enqueue page to free list
         //
 
         if (freedPFN->refCount == 0) {
@@ -571,15 +605,15 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
             enqueueEvent(&readInProgEventListHead, readInProgEventNode);
 
+            //
+            // Release PFN in awaiting free state (i.e. clear
+            // pagefile space, reset pagefileoffset field, 
+            // clear remodified bit)
+            //
+
+            releaseAwaitingFreePFN(freedPFN);
+
         }
-
-        //
-        // Release PFN in awaiting free state (i.e. clear
-        // pagefile space, reset pagefileoffset field, 
-        // clear remodified bit)
-        //
-
-        releaseAwaitingFreePFN(freedPFN);
 
         releaseJLock(&freedPFN->lockBits);
 
@@ -703,7 +737,9 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     //
     // If current thread is the last waiting thread, clear the 
     // readInProg node from the PFN field and re-enqueue
-    // to event list.
+    // to event list. PFN itself is not enqueued onto a list since
+    // it is active, and since no PTE change has occurred since
+    // PTE lock was acquired
     //    
 
     freedPFN->refCount--;
