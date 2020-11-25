@@ -147,6 +147,13 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
     PPTE endPTE;
     ULONG_PTR numVADPages;
 
+    if (numPages == 0) {
+
+        PRINT("No pages allocated\n");
+        return NULL;
+
+    }
+
     if (isMemCommit > 1) {
         
         PRINT_ERROR("[commitVAD] invalid boolean value\n");
@@ -322,6 +329,7 @@ deleteVAD(void* VA)
 
     PVADNode removeVAD;
     BOOLEAN bRes;
+    ULONG_PTR bitIndex;
 
     //
     // Acquire both VAD locks in order to delete a VAD
@@ -398,12 +406,12 @@ deleteVAD(void* VA)
     //
 
     if (removeVAD->commitBit) {
-
+            //todo - include reserve vad now that commit is maintained
         ASSERT(removeVAD->commitCount == 0);
 
     }
 
-    // ULONG_PTR numDecommitted;
+    // ULONG_PTR numDecommitted;        // todo
 
     // numDecommitted = checkDecommitted(FALSE, getPTE(removeVAD->startVA), getPTE((ULONG_PTR)removeVAD->startVA + (removeVAD->numPages << PAGE_SHIFT) - 1));
 
@@ -418,18 +426,72 @@ deleteVAD(void* VA)
 
     LeaveCriticalSection(&VADListHead.lock);
 
-
-    ULONG_PTR bitIndex;
+    //
+    // Calculate starting bitindex to clear from PF bitarray
+    //
 
     bitIndex = ((ULONG_PTR) removeVAD->startVA - (ULONG_PTR) leafVABlock) >> PAGE_SHIFT;
-    // startVA = (PVOID) ( (bitIndex << PAGE_SHIFT) + (ULONG_PTR) leafVABlock );
 
     setBitRange(FALSE, bitIndex, removeVAD->numPages, VADBitArray );
 
-
+    //
+    // Free VAD struct
+    //
 
     free(removeVAD);
 
     return TRUE;
+
+}
+
+
+
+VOID 
+checkVADCommit(PVADNode currVAD)
+{
+
+    PVOID startVA;
+    PVOID endVA;
+    PPTE startPTE;
+    PPTE endPTE;
+    ULONG_PTR commitSizeInBytes;
+    ULONG_PTR numCommitted;
+    ULONG_PTR numDecommitted;
+
+    startVA = currVAD->startVA;
+
+    commitSizeInBytes = currVAD->numPages << PAGE_SHIFT;
+
+    endVA = (PVOID) ((ULONG_PTR) startVA + commitSizeInBytes - 1);
+
+    startPTE = getPTE(startVA);
+
+    if (startPTE == NULL) {
+
+        PRINT("[commitVA] Starting address does not correspond to a valid PTE\n");
+        return;
+
+    }
+
+    endPTE = getPTE(endVA);
+
+    if (endPTE == NULL) {
+
+        PRINT("[commitVA] Ending address does not correspond to a valid PTE\n");
+        
+        return;
+
+    }
+
+#if 1
+    numDecommitted = checkDecommitted(currVAD, startPTE, endPTE);
+#else
+    numDecommitted = checkDecommitted( (BOOLEAN)currVAD->commitBit, startPTE, endPTE);
+#endif
+
+
+    numCommitted = currVAD->numPages - numDecommitted;
+
+    ASSERT(numCommitted == currVAD->commitCount);
 
 }

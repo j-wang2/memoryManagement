@@ -1,3 +1,5 @@
+#ifndef VADNODES_H
+#define VADNODES_H
 #include "userMode-AWE-pageFile.h"
 
 typedef struct _VADNode {
@@ -84,3 +86,11 @@ createVAD(void* startVA, ULONG_PTR size, PTEpermissions permissions, BOOLEAN isM
  */
 BOOLEAN
 deleteVAD(void* VA);
+
+
+
+VOID 
+checkVADCommit(PVADNode currVAD);
+
+
+#endif

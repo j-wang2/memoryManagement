@@ -924,9 +924,9 @@ checkVADPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     
     //
     // Release lock during duration of demand zero fault
-    //
+    //  TODO
 
-    LeaveCriticalSection(&VADWriteLock);
+    // LeaveCriticalSection(&VADWriteLock);
 
     //
     // Get permissions from the VAD and insert into new "demand zero" PTE
@@ -937,6 +937,8 @@ checkVADPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     snapPTE.u1.dzPTE.permissions = VADpermissions;
 
     dzStatus = demandZeroPageFault(virtualAddress, RWEpermissions, snapPTE, masterPTE);
+
+    LeaveCriticalSection(&VADWriteLock);
 
     return dzStatus;
 
@@ -977,40 +979,40 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
 
     acquirePTELock(currPTE);
 
-    //TODO CHECK
+    // // TODO CHECK delete this
 
-    PVADNode currVAD;
+    // PVADNode currVAD;
 
-    //
-    // Get VAD "write" lock (acquiring the other VAD lock causes
-    // AB-BA deadlock issue with PTE lock, since PTE lock is acquired 
-    // AFTER VAD "read" lock in commit/decommit)
-    //
+    // //
+    // // Get VAD "write" lock (acquiring the other VAD lock causes
+    // // AB-BA deadlock issue with PTE lock, since PTE lock is acquired 
+    // // AFTER VAD "read" lock in commit/decommit)
+    // //
 
-    EnterCriticalSection(&VADWriteLock);
+    // EnterCriticalSection(&VADWriteLock);
 
-    currVAD = getVAD(virtualAddress);
+    // currVAD = getVAD(virtualAddress);
 
-    //
-    // If VAD is non-existent, reserve, or deleted, return an access violation
-    //
+    // //
+    // // If VAD is non-existent, reserve, or deleted, return an access violation
+    // //
 
-    if (currVAD == NULL || currVAD->deleteBit) {
+    // if (currVAD == NULL || currVAD->deleteBit) {
 
-        LeaveCriticalSection(&VADWriteLock);
-        releasePTELock(currPTE);
+    //     LeaveCriticalSection(&VADWriteLock);
+    //     releasePTELock(currPTE);
 
-        PRINT("[checkVADPageFault] VA does not correspond to a VAD\n");
+    //     PRINT("[checkVADPageFault] VA does not correspond to a VAD\n");
 
-        return ACCESS_VIOLATION;
+    //     return ACCESS_VIOLATION;
 
-    }
+    // }
     
-    //
-    // Release lock during duration of demand zero fault
-    //
+    // //
+    // // Release lock during duration of demand zero fault
+    // //
 
-    LeaveCriticalSection(&VADWriteLock);
+    // LeaveCriticalSection(&VADWriteLock);
 
     //
     // Make a shallow copy/"snapshot" of the PTE to edit and check

@@ -27,6 +27,7 @@
 // #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing
                                                 // program to run sans pagefile
 #define PTE_CHANGE_LOG
+#define VAD_COMMIT_CHECK
 // #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
                                                 // for the pagefile that includes additional information
 #define AV_TEMP_TESTING                                // temporary workaround for PF due to app verifier

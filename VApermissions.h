@@ -2,6 +2,7 @@
 #define VAPERMISSION_H
 
 #include "userMode-AWE-pageFile.h"
+#include "VADNodes.h"
 
 /*
  * accessVA: function to access a VA, given either read or write permissions
@@ -116,7 +117,14 @@ commitPages (ULONG_PTR numPages);
 BOOLEAN
 decommitPages (ULONG_PTR numPages);
 
+#if 1
 
+ULONG_PTR
+checkDecommitted(PVADNode currVAD, PPTE startPTE, PPTE endPTE);
+
+
+
+#else
 /*
  * checkDecommitted: function to determine how many PTEs in a given 
  * range have been committed
@@ -128,6 +136,7 @@ decommitPages (ULONG_PTR numPages);
  */
 ULONG_PTR
 checkDecommitted(BOOLEAN isVADCommit, PPTE startPTE, PPTE endPTE);
+#endif
 
 
 #endif

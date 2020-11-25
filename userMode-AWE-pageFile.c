@@ -1182,7 +1182,9 @@ faultAndAccessTest()
     
     #ifdef COMMIT_VAD
         
-        vadSize = numPagesReturned / 32;    // todo
+        // vadSize = numPagesReturned / 32;    // todo
+
+        // vadSize = GetTickCount() % numPagesReturned;
 
         //
         // Create MEM_COMMIT VADs
@@ -1190,9 +1192,12 @@ faultAndAccessTest()
 
         node = createVAD(NULL, vadSize, READ_WRITE, TRUE);
 
-    #elif RESERVE_VAD
+    #elif defined RESERVE_VAD
 
         vadSize = virtualMemPages / 4;      // todo
+
+        // vadSize = GetTickCount() %  numPagesReturned;
+
 
         //
         // Create MEM_RESERVE VADs
@@ -1205,6 +1210,8 @@ faultAndAccessTest()
         BOOLEAN randomVADType;
 
         vadSize = numPagesReturned / 32;    // todo
+
+        // vadSize = GetTickCount() %  numPagesReturned;
 
         //
         // Pseudo-randomize distribution of MEM_RESERVE/MEM_COMMIT VADs
@@ -1361,7 +1368,7 @@ faultAndAccessTest()
 
         decommitVA(testVA, vadSize << PAGE_SHIFT);
 
-    #elif RESERVE_VAD
+    #elif defined RESERVE_VAD
 
         decommitVA(testVA, virtualMemPages << PAGE_SHIFT);
 
