@@ -6,7 +6,7 @@
 
 #ifdef PTE_CHANGE_LOG
 
-#define LOG_ARRAY_SIZE 0x4000
+#define LOG_ARRAY_SIZE 0x8000
 
 typedef struct _PTETrace {
 

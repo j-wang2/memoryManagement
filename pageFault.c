@@ -957,12 +957,6 @@ checkVADPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
         return ACCESS_VIOLATION;
 
     }
-    
-    //
-    // Release lock during duration of demand zero fault
-    //  TODO
-
-    // LeaveCriticalSection(&VADWriteLock);
 
     //
     // Get permissions from the VAD and insert into new "demand zero" PTE
@@ -973,6 +967,11 @@ checkVADPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
     snapPTE.u1.dzPTE.permissions = VADpermissions;
 
     dzStatus = demandZeroPageFault(virtualAddress, RWEpermissions, snapPTE, masterPTE);
+
+    //
+    // VAD "write" lock must be held throughout fault to avoid the VAD from 
+    // being deleted from under the pagefault
+    //
 
     LeaveCriticalSection(&VADWriteLock);
 
@@ -1014,41 +1013,6 @@ pageFault(void* virtualAddress, PTEpermissions RWEpermissions)
     //
 
     acquirePTELock(currPTE);
-
-    // // TODO CHECK delete this
-
-    // PVADNode currVAD;
-
-    // //
-    // // Get VAD "write" lock (acquiring the other VAD lock causes
-    // // AB-BA deadlock issue with PTE lock, since PTE lock is acquired 
-    // // AFTER VAD "read" lock in commit/decommit)
-    // //
-
-    // EnterCriticalSection(&VADWriteLock);
-
-    // currVAD = getVAD(virtualAddress);
-
-    // //
-    // // If VAD is non-existent, reserve, or deleted, return an access violation
-    // //
-
-    // if (currVAD == NULL || currVAD->deleteBit) {
-
-    //     LeaveCriticalSection(&VADWriteLock);
-    //     releasePTELock(currPTE);
-
-    //     PRINT("[checkVADPageFault] VA does not correspond to a VAD\n");
-
-    //     return ACCESS_VIOLATION;
-
-    // }
-    
-    // //
-    // // Release lock during duration of demand zero fault
-    // //
-
-    // LeaveCriticalSection(&VADWriteLock);
 
     //
     // Make a shallow copy/"snapshot" of the PTE to edit and check

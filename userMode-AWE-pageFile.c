@@ -1179,12 +1179,15 @@ faultAndAccessTest()
 
     PRINT_ALWAYS("Fault and access test\n");
 
+    //
+    // Quasi-randomize vadSize based on tick count (with maximum size of 
+    // numPagesReturned or physical page count)
+    //
+
+    vadSize = GetTickCount() % numPagesReturned;
     
     #ifdef COMMIT_VAD
-        
-        // vadSize = numPagesReturned / 32;    // todo
 
-        vadSize = GetTickCount() % numPagesReturned;
 
         //
         // Create MEM_COMMIT VADs
@@ -1193,11 +1196,6 @@ faultAndAccessTest()
         node = createVAD(NULL, vadSize, READ_WRITE, TRUE);
 
     #elif defined RESERVE_VAD
-
-        vadSize = virtualMemPages / 4;      // todo
-
-        // vadSize = GetTickCount() %  numPagesReturned;
-
 
         //
         // Create MEM_RESERVE VADs
@@ -1208,10 +1206,6 @@ faultAndAccessTest()
     #else
 
         BOOLEAN randomVADType;
-
-        // vadSize = numPagesReturned / 32;    // todo
-
-        vadSize = GetTickCount() %  numPagesReturned;
 
         //
         // Pseudo-randomize distribution of MEM_RESERVE/MEM_COMMIT VADs
@@ -1258,8 +1252,19 @@ faultAndAccessTest()
         faultStatus testStatus;
         ULONG_PTR commitSize;
 
-        commitSize = GetTickCount() % 5;
-        // commitSize = 1;
+        //
+        // Randomize commit sizes (with a maximum at the vadSize)
+        //
+
+        if (vadSize != 0) {
+
+            commitSize = (GetTickCount() % vadSize) << PAGE_SHIFT;
+
+        } else {
+    
+            commitSize = 1;
+
+        }
 
         bRes = commitVA(testVA, READ_WRITE, commitSize);     // commits with READ_ONLY permissions
 
@@ -1462,7 +1467,7 @@ trimValidPTEs()
     // Calculate PTEs in range
     //
 
-    PTEsInRange = (((ULONG_PTR)leafVABlockEnd - (ULONG_PTR)leafVABlock) / PAGE_SIZE);
+    PTEsInRange = ( ( (ULONG_PTR) leafVABlockEnd - (ULONG_PTR) leafVABlock ) / PAGE_SIZE);
 
     endPTE = PTEarray + PTEsInRange;
 

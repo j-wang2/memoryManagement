@@ -114,8 +114,12 @@ checkVADRange(void* startVA, ULONG_PTR size)
         //
 
         VADStartPTE = getPTE(currVAD->startVA);
+
+        //
+        // -1 for inclusivity check
+        //
         
-        VADEndPTE = VADStartPTE + currVAD->numPages;
+        VADEndPTE = VADStartPTE + currVAD->numPages - 1;
 
         // 
         // If a VAD's start or end PTE falls within proposed/requested 
@@ -222,7 +226,7 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
 
     if (startVA != NULL) {
 
-        if ( ! checkVADRange(startVA, numPages)) {
+        if ( ! checkVADRange(startVA, (numPages << PAGE_SHIFT) ) ) {
 
             LeaveCriticalSection(&VADWriteLock);
 
@@ -230,7 +234,16 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
 
             free(newNode);
 
-            decommitPages(numPages);
+            //
+            // Only if VAD is mem commit, decommit pages that were previously
+            // allocated
+            //
+
+            if (isMemCommit) {
+
+                decommitPages(numPages);
+
+            }
 
             PRINT("[commitVAD] Unable to create new VAD node (address overlap)\n");
 
@@ -257,7 +270,16 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
 
             free(newNode);
 
-            decommitPages(numPages);
+            //
+            // Only if VAD is mem commit, decommit pages that were previously
+            // allocated
+            //
+
+            if (isMemCommit) {
+
+                decommitPages(numPages);
+
+            }
 
             PRINT("[commitVAD] Unable to create new VAD node (insufficient space in VM range)\n");
 
@@ -266,6 +288,13 @@ createVAD(void* startVA, ULONG_PTR numPages, PTEpermissions permissions, BOOLEAN
         }
 
         startVA = (PVOID) ( (bitIndex << PAGE_SHIFT) + (ULONG_PTR) leafVABlock );
+
+        //
+        // Assert that startVA is not already in another VAD (would indicate 
+        // a bitmap error due to overlap)
+        //
+
+        ASSERT (checkVADRange(startVA, (numPages << PAGE_SHIFT)));
 
     }
 
@@ -392,6 +421,20 @@ deleteVAD(void* VA)
     
     EnterCriticalSection(&VADListHead.lock);
 
+    #if VAD_COMMIT_CHECK
+
+        ULONG_PTR numDecommitted;
+
+        //
+        // Once "read" lock is acquired, check PTEs to verify that all pages have been decommmitted
+        //
+
+        numDecommitted = checkDecommitted(removeVAD, getPTE(removeVAD->startVA), getPTE((PVOID) ( (ULONG_PTR)removeVAD->startVA + (removeVAD->numPages << PAGE_SHIFT) - 1) ) );
+
+        ASSERT(numDecommitted == removeVAD->numPages);
+
+    #endif
+
     EnterCriticalSection(&VADWriteLock);
 
     //
@@ -406,17 +449,18 @@ deleteVAD(void* VA)
     //
 
     if (removeVAD->commitBit == 0) {
-        
+
         ASSERT(removeVAD->commitCount == 0);    // todo
 
     }
 
+    //
+    // Calculate starting bitindex to clear from PF bitarray
+    //
 
-    // ULONG_PTR numDecommitted;        // todo
+    bitIndex = ((ULONG_PTR) removeVAD->startVA - (ULONG_PTR) leafVABlock) >> PAGE_SHIFT;
 
-    // numDecommitted = checkDecommitted(FALSE, getPTE(removeVAD->startVA), getPTE((ULONG_PTR)removeVAD->startVA + (removeVAD->numPages << PAGE_SHIFT) - 1));
-
-    // ASSERT(numDecommitted == removeVAD->numPages);
+    setBitRange(FALSE, bitIndex, removeVAD->numPages, VADBitArray );     // TODO comment back in
 
     //
     // Exit critical sections in inverse order of acquisition
@@ -426,14 +470,6 @@ deleteVAD(void* VA)
     LeaveCriticalSection(&VADWriteLock);
 
     LeaveCriticalSection(&VADListHead.lock);
-
-    //
-    // Calculate starting bitindex to clear from PF bitarray
-    //
-
-    bitIndex = ((ULONG_PTR) removeVAD->startVA - (ULONG_PTR) leafVABlock) >> PAGE_SHIFT;
-
-    setBitRange(FALSE, bitIndex, removeVAD->numPages, VADBitArray );
 
     //
     // Free VAD struct
@@ -484,18 +520,12 @@ checkVADCommit(PVADNode currVAD)
 
     }
 
-#if 1
-
     //
     // VAD "read" lock MUST be held by caller so currVAD can be passed and read 
     // accurately as a parameter to checkDecommitted
     //
 
     numDecommitted = checkDecommitted(currVAD, startPTE, endPTE);
-#else
-    numDecommitted = checkDecommitted( (BOOLEAN)currVAD->commitBit, startPTE, endPTE);
-#endif
-
 
     numCommitted = currVAD->numPages - numDecommitted;
 
@@ -540,5 +570,53 @@ decrementCommit(PVADNode currVAD)
     ASSERT(totalCommittedPages != 0);
 
     InterlockedDecrement64(&totalCommittedPages);
+
+}
+
+
+VOID
+decrementMultipleCommit(PVADNode currVAD, ULONG_PTR numPages)
+{
+
+    BOOLEAN bRes;
+
+    //
+    // Acquire and release VAD write lock to decrement commit count
+    //
+
+    EnterCriticalSection(&VADWriteLock);
+
+    ASSERT(currVAD->commitCount >= numPages);
+
+    currVAD->commitCount -= numPages;
+
+    LeaveCriticalSection(&VADWriteLock);
+
+    #ifdef VAD_COMMIT_CHECK
+
+        //
+        // VAD read lock must remain held at this point so that 
+        // currVAD can be read accurately by callee commit
+        // checks
+        //
+    
+        checkVADCommit(currVAD);
+
+    #endif
+    
+    //
+    // Decrement global committed page count regardless of whether VAD is 
+    // commit or reserve
+    //
+
+    ASSERT(totalCommittedPages != 0);
+
+    bRes = decommitPages(numPages);
+
+    if (bRes == FALSE) {
+
+        PRINT_ERROR("[decrementMultipleCommit] wrapping error\n");
+
+    }
 
 }

@@ -21,13 +21,27 @@ reserveBitRange(ULONG_PTR bits, PULONG_PTR bitArray, ULONG_PTR bitArraySize)
     ULONG_PTR i;
     ULONG_PTR j;
 
+    //
+    // Initialize bit index return val to invalid value
+    //
+
+    bitIndex = INVALID_BITARRAY_INDEX;
+
+    //
+    // Initialize i and j index variables to zero
+    //
+
     i = 0;
+
     j = 0;
 
+    //
+    // Initialize bitsFound and success variables to zero and false,
+    // respectively
+    //
 
     bitsFound = 0;
     
-
     success = FALSE;
 
     //
@@ -70,22 +84,53 @@ reserveBitRange(ULONG_PTR bits, PULONG_PTR bitArray, ULONG_PTR bitArraySize)
                 // has been reached - if so, break
                 //
 
+                if (bitsFound == 0) {
+
+                    //
+                    // If bitsFound is zero, this marks the prospective start
+                    // of an open space - therefore, calculate the bitindex
+                    //
+
+                    bitIndex = i * BITS_PER_FRAME + j;
+
+                }
+
                 bitsFound++;
+
+                //
+                // If a stretch of bits is found, set success flag to true and
+                // break out of the loop
+                //
 
                 if (bitsFound == bits) {
 
                     success = TRUE;
+
+                    //
+                    // Increment j one more time (to account for zero-indexing)
+                    //
+
                     j++;
+
                     break;
 
                 }
 
             } else {
 
+                //
+                // Reset bitsfound and set success flag to false
+                //
+
                 bitsFound = 0;
+
                 success = FALSE;
 
             }
+
+            //
+            // Shift current frame by a single bit
+            //
 
             currFrame >>= 1;
 
@@ -107,9 +152,20 @@ reserveBitRange(ULONG_PTR bits, PULONG_PTR bitArray, ULONG_PTR bitArraySize)
 
     if (success) {
 
-        bitIndex = i * BITS_PER_FRAME + j - bits;
+        //
+        // If success flag is set, bitindex cannot be invalid (since it 
+        // would have been set en route)
+        //
+
+        ASSERT(bitIndex != INVALID_BITARRAY_INDEX);
+
+        //
+        // Now that a clear range has been found, call set bit range with
+        // first param set in order to reflect this change in the bitarray
+        //
 
         setBitRange(TRUE, bitIndex, bits, bitArray);
+
         return bitIndex;
 
     } else {
@@ -136,13 +192,13 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
     // i variable keeps track of byte increments (i.e. "bytes place")
     //
 
-    i = startBitIndex / (sizeof(ULONG_PTR) * 8);
+    i = startBitIndex / BITS_PER_FRAME;
 
     //
     // j variable keeps track of bit increments (i.e. "bits place")
     // 
 
-    j = startBitIndex % (sizeof(ULONG_PTR) * 8);
+    j = startBitIndex % BITS_PER_FRAME;
 
     if (j != 0) {
 
@@ -155,14 +211,23 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
             currFrame = bitArray[i];
 
             if (isSet) {
+
+                ASSERT( (currFrame & ((ULONG_PTR)1 << l) ) == 0);
+
                 currFrame |= ((ULONG_PTR)1 << l);
 
             } else {
+
+                ASSERT( currFrame & ((ULONG_PTR)1 << l) );
+
                 currFrame &= ~((ULONG_PTR)1 << l);
+
             }
 
-
+            //
             // set the frame in the bitarray to the newly edited frame
+            //
+
             bitArray[i] = currFrame;
 
             numPages--;
@@ -178,15 +243,24 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
     // AND increment i (as the index of ULONG_PTR denomination)
     //
 
-    if (numPages >= 64) {
+    if (numPages >= BITS_PER_FRAME) {
 
-        for ( i = i; i < numPages/64; i++) {
+        //
+        // Must use a different ULONG_PTR (k) since i does not necessarily 
+        // start at zero (but k should)
+        //
+
+        for (ULONG_PTR k = 0; k < numPages/BITS_PER_FRAME; k += 1, i++) {
 
             if (isSet) {
+
+                ASSERT(bitArray[i] == 0);
 
                 bitArray[i] = MAXULONG_PTR;
 
             } else {
+
+                ASSERT(bitArray[i] == MAXULONG_PTR);
 
                 bitArray[i] = 0;
 
@@ -194,7 +268,7 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
 
         }
 
-        numPages %= 64;
+        numPages %= BITS_PER_FRAME;
 
     }
 
@@ -208,10 +282,17 @@ setBitRange(BOOLEAN isSet, ULONG_PTR startBitIndex, ULONG_PTR numPages, PULONG_P
 
 
         if (isSet) {
+
+            ASSERT( (currFrame & ((ULONG_PTR)1 << n) ) == 0);
+
             currFrame |= ((ULONG_PTR)1 << n);
 
         } else {
+
+            ASSERT( currFrame & ((ULONG_PTR)1 << n) );
+
             currFrame &= ~((ULONG_PTR)1 << n);
+
         }
 
         //

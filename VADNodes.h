@@ -88,7 +88,12 @@ BOOLEAN
 deleteVAD(void* VA);
 
 
-
+/*
+ * checkVADCommit: function to compare VAD commit count with actual commited PTEs
+ *  - called when VAD_COMMIT_CHECK is toggled on
+ * 
+ * No return val
+ */
 VOID 
 checkVADCommit(PVADNode currVAD);
 
@@ -105,5 +110,17 @@ checkVADCommit(PVADNode currVAD);
  */
 VOID
 decrementCommit(PVADNode currVAD);
+
+
+/*
+ * decrementMultipleCommit: function to decrement both VAD and global commit charge
+ *  - like decrementCommit, but will decrement commit by multiple rather than a single
+ *    decrement
+ *  - VAD "read" lock must be held by caller
+ * 
+ * No return val
+ */
+VOID
+decrementMultipleCommit(PVADNode currVAD, ULONG_PTR numPages);
 
 #endif
