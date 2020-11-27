@@ -247,8 +247,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
                        || (transitionPFN->statusBits == STANDBY && transitionPFN->remodifiedBit) ) {
 
                 //
-                // Clear remodified bit and enqueue to standby list
-                // todo - check this case (standby & remodified)
+                // Clear remodified bit and enqueue to modified list
                 //
 
                 transitionPFN->remodifiedBit = 0;
@@ -256,7 +255,7 @@ transPageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapPTE,
                 enqueuePage(&modifiedListHead, transitionPFN);
 
             } else if (transitionPFN->statusBits == STANDBY) {
-
+                
                 enqueuePage(&standbyListHead, transitionPFN);
 
             }
@@ -589,7 +588,7 @@ pageFilePageFault(void* virtualAddress, PTEpermissions RWEpermissions, PTE snapP
 
         freedPFN->readInProgressBit = 0;
         
-        SetEvent(readInProgEventNode->event);       // todo - holding lock while setting event
+        SetEvent(readInProgEventNode->event);
 
         freedPFN->refCount--;
 

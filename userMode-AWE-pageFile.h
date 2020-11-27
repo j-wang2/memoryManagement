@@ -25,9 +25,12 @@
 // Toggle VAD type (default is randomized mixture of commit and reserve)
 //
 
-#define COMMIT_VAD  
+// #define COMMIT_VAD  
 // #define RESERVE_VAD
-// #define VAD_COMMIT_CHECK
+// #ifndef COMMIT_VAD
+
+    #define VAD_COMMIT_CHECK
+// #endif
 
 
 #define CHECK_PFNS
@@ -39,7 +42,7 @@
 #define AV_TEMP_TESTING                                // temporary workaround for PF due to app verifier
 #define TESTING_ZERO                                // toggles zero page thread
 #define TESTING_MODIFIED                            // toggles modified page writer thread
-// #define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
+#define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
 #define CONTINUOUS_FAULT_TEST
 // #define TRADE_PAGES                          // deprecated (page trading functionality not up to date with current program)
 

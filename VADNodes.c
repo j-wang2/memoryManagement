@@ -421,7 +421,7 @@ deleteVAD(void* VA)
     
     EnterCriticalSection(&VADListHead.lock);
 
-    #if VAD_COMMIT_CHECK
+    #ifdef VAD_COMMIT_CHECK
 
         ULONG_PTR numDecommitted;
 
@@ -445,22 +445,19 @@ deleteVAD(void* VA)
     dequeueSpecificVAD(removeVAD);
 
     //
-    // If VAD is commit, assert that there are no remaining committed pages within it
+    // Assert that there are no remaining committed pages within it
     //
 
-    if (removeVAD->commitBit == 0) {
-
-        ASSERT(removeVAD->commitCount == 0);    // todo
-
-    }
+    ASSERT(removeVAD->commitCount == 0);
 
     //
-    // Calculate starting bitindex to clear from PF bitarray
+    // Calculate starting bitindex to clear from PF bitarray and clear bit
+    // range from the VAD bit array
     //
 
     bitIndex = ((ULONG_PTR) removeVAD->startVA - (ULONG_PTR) leafVABlock) >> PAGE_SHIFT;
 
-    setBitRange(FALSE, bitIndex, removeVAD->numPages, VADBitArray );     // TODO comment back in
+    setBitRange(FALSE, bitIndex, removeVAD->numPages, VADBitArray );
 
     //
     // Exit critical sections in inverse order of acquisition

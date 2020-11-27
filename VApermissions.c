@@ -599,7 +599,7 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize)
         }
 
         //
-        // If VAD is commit, verify the decommit bit is set in the PTE (Todo check with deleteVAD)
+        // If VAD is commit, verify the decommit bit is set in the PTE
         // since it must have been set to hit this path
         //
 
@@ -1417,7 +1417,7 @@ decommitVA (PVOID startVA, ULONG_PTR commitSize)
             // only remainingcase w validity is zero PTE with a commit VAD is committed
             //
 
-            PRINT_ERROR("[decommitVA] unrecognized state\n");        // TODO
+            PRINT_ERROR("[decommitVA] unrecognized state\n");
         }
 
         //
@@ -1648,11 +1648,7 @@ checkDecommitted(PVADNode currVAD, PPTE startPTE, PPTE endPTE)
                 && (tempPTE.u1.dzPTE.decommitBit 
                     || ( currVAD->deleteBit && tempPTE.u1.ulongPTE == 0 )
             ) ) ) {
-#if 0
-            ASSERT(tempPTE.u1.dzPTE.padding == 0 
-                    && tempPTE.u1.dzPTE.pageFileIndex == INVALID_BITARRAY_INDEX
-                    && tempPTE.u1.dzPTE.permissions == 0);
-#endif
+
             numDecommitted++;
 
         }
