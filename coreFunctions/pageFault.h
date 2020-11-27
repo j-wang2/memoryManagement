@@ -1,7 +1,7 @@
 #ifndef PAGEFAULT_H
 #define PAGEFAULT_H
 
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
 
 
 /*

@@ -1,8 +1,8 @@
-#include "userMode-AWE-pageFile.h"
-#include "enqueue-dequeue.h"
-// #include "pagefile.h"
-#include "jLock.h"
-#include "PTEpermissions.h"
+#include "../usermodeMemoryManager.h"
+#include "../infrastructure/enqueue-dequeue.h"
+#include "../infrastructure/jLock.h"
+#include "../datastructures/PTEpermissions.h"
+#include "pagefile.h"
 
 #ifndef PAGEFILE_PFN_CHECK
 

@@ -1,4 +1,4 @@
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
 
 /*
  * reserveBitRange: function to find and set a clear range of bits in a bitarray

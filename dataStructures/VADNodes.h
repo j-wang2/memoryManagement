@@ -1,6 +1,6 @@
 #ifndef VADNODES_H
 #define VADNODES_H
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
 
 typedef struct _VADNode {
     LIST_ENTRY links;
@@ -25,26 +25,6 @@ typedef struct _VADNode {
  */
 PVADNode
 getVAD(void* virtualAddress);
-
-
-/*
- * enqueueVAD: function to enqueue a provided VAD to list
- *  - Both acquires and releases list lock 
- * 
- * No return value
- */
-VOID
-enqueueVAD(PlistData listHead, PVADNode newNode);
-
-
-/*
- * dequeueSpecificVAD: function to dequeue a particular node from list
- *  - Both acquires and releases list lock
- * 
- * No return value
- */
-VOID
-dequeueSpecificVAD(PVADNode removeNode);
 
 
 /*

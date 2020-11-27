@@ -3,11 +3,14 @@
 # Jason Wang
 # Summer/Fall 2020
 
-CURRPROG = userMode-AWE-pageFile
+CURRPROG = usermodeMemoryManager
 PROGS = $(CURRPROG).exe
 OBJS = *.obj
+DATASTRUCTURES = ./dataStructures/PTEpermissions.c ./dataStructures/VApermissions.c ./dataStructures/VADNodes.c
+COREFUNCTIONS = ./coreFunctions/pageFault.c ./coreFunctions/pageFile.c ./coreFunctions/getPage.c ./coreFunctions/pageTrade.c 
+INFRASTRUCTURE = ./infrastructure/bitOps.c ./infrastructure/enqueue-dequeue.c ./infrastructure/jLock.c
 
-SOURCES = $(CURRPROG).c enqueue-dequeue.c pageFault.c pageFile.c getPage.c PTEpermissions.c VApermissions.c pageTrade.c jLock.c VADNodes.c bitOps.c
+SOURCES = $(CURRPROG).c $(DATASTRUCTURES) $(COREFUNCTIONS) $(INFRASTRUCTURE)
 
 
 CFLAGS = /DEBUG:FULL /Zi
@@ -35,3 +38,5 @@ clean:
 	$(DEL) *.obj
 	$(DEL) *.pdb
 	$(DEL) *.ilk
+
+

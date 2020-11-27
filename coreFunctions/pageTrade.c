@@ -1,10 +1,10 @@
-#include "userMode-AWE-pageFile.h"
-#include "enqueue-dequeue.h"
+#include "../usermodeMemoryManager.h"
+#include "../infrastructure/enqueue-dequeue.h"
+#include "../infrastructure/jLock.h"
+#include "../dataStructures/VApermissions.h"
+#include "../dataStructures/PTEpermissions.h"
 #include "getPage.h"
 #include "pageFault.h"
-#include "jLock.h"
-#include "VApermissions.h"
-#include "PTEpermissions.h"
 
 BOOLEAN
 tradeFreeOrZeroPage(ULONG_PTR PFNtoTrade)

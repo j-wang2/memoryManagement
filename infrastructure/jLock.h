@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <windows.h>
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
 
 /*
  * acquireJLock: function to acquire a lock

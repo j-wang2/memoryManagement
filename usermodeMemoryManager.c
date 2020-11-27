@@ -6,16 +6,17 @@
  */
 
 
-#include "userMode-AWE-pageFile.h"
-#include "enqueue-dequeue.h"
-#include "pageFile.h"
-#include "getPage.h"
-#include "PTEpermissions.h"
-#include "VApermissions.h"
-#include "pageFault.h"
-#include "jLock.h"
-#include "pageTrade.h"
-#include "VADNodes.h"
+#include "usermodeMemoryManager.h"
+#include "./infrastructure/enqueue-dequeue.h"
+#include "./infrastructure/jLock.h"
+#include "./coreFunctions/pageFile.h"
+#include "./coreFunctions/getPage.h"
+#include "./coreFunctions/pageFault.h"
+#include "./coreFunctions/pageTrade.h"
+#include "./dataStructures/PTEpermissions.h"
+#include "./dataStructures/VApermissions.h"
+#include "./dataStructures/VADNodes.h"
+
 
 /******************************************************
  *********************** GLOBALS **********************
@@ -2310,7 +2311,7 @@ testRoutine()
     }  
 
 
-    #ifdef TESTING_ZERO
+    #ifdef ZERO_PAGE_THREAD
     /************ for testing of zeropagethread **************/
 
     PRINT_ALWAYS(" - %d freePage threads\n", NUM_THREADS);
@@ -2330,7 +2331,7 @@ testRoutine()
     }
     #endif
 
-    #ifdef TESTING_MODIFIED
+    #ifdef MODIFIED_WRITER_THREAD
 
     PRINT_ALWAYS(" - %d modifiedWriter threads\n", NUM_THREADS);
 
@@ -2445,13 +2446,13 @@ testRoutine()
 
     WaitForMultipleObjects(NUM_THREADS, zeroPageThreadHandles, TRUE, INFINITE);
 
-    #ifdef TESTING_ZERO
+    #ifdef ZERO_PAGE_THREAD
 
         WaitForMultipleObjects(NUM_THREADS, freePageTestThreadHandles, TRUE, INFINITE);
     
     #endif
 
-    #ifdef TESTING_MODIFIED
+    #ifdef MODIFIED_WRITER_THREAD
 
         WaitForMultipleObjects(NUM_THREADS, modifiedPageWriterThreadHandles, TRUE, INFINITE);
 

@@ -1,7 +1,7 @@
 #ifndef PTEPERMISSIONS_H
 #define PTEPERMISSIONS_H
 
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
 
 
 #ifdef PTE_CHANGE_LOG
@@ -57,6 +57,18 @@ logEntry(PPTE dest, PTE oldValue, PTE newValue, PPFNdata currPage);
  */
 VOID
 writePTE(PPTE dest, PTE value);
+
+
+/*
+ * trimPTE: function to trim a PTE from active->transition
+ *  - called either directly or by trimVA
+ * 
+ * Returns BOOLEAN:
+ *  - TRUE if success
+ *  - FALSE if failure
+ */
+BOOLEAN
+trimPTE(PPTE PTEaddress);
 
 
 /*

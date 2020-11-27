@@ -1,7 +1,7 @@
 #ifndef VAPERMISSIONS_H
 #define VAPERMISSION_H
 
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
 #include "VADNodes.h"
 
 /*
@@ -64,9 +64,6 @@ commitVA (PVOID startVA, PTEpermissions RWEpermissions, ULONG_PTR commitSize);
  */
 BOOLEAN
 protectVA(PVOID startVA, PTEpermissions newRWEpermissions, ULONG_PTR commitSize);
-
-BOOLEAN
-trimPTE(PPTE PTEaddress);
 
 
 /*

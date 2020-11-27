@@ -1,4 +1,5 @@
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
+#include "../dataStructures/VADNodes.h"
 #include "jLock.h"
 #include "enqueue-dequeue.h"
 
@@ -970,5 +971,28 @@ enqueueEvent(PlistData listHead, PeventNode eventNode)
     //
     
     LeaveCriticalSection(&(listHead->lock));
+
+}
+
+
+
+VOID
+enqueueVAD(PlistData listHead, PVADNode newNode)
+{
+
+    enqueue(&listHead->head, &newNode->links);
+
+    listHead->count++;
+
+}
+
+
+VOID
+dequeueSpecificVAD(PlistData listHead, PVADNode removeNode)
+{
+
+    dequeueSpecific(&removeNode->links);
+
+    listHead->count--;
 
 }

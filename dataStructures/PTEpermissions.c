@@ -1,5 +1,9 @@
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
+#include "../coreFunctions/pageFile.h"
+#include "../infrastructure/jLock.h"
+#include "../infrastructure/enqueue-dequeue.h"
 #include "PTEpermissions.h"
+
 
 //
 // Logging functions enabled only if PTE_CHANGE_LOG
@@ -134,6 +138,201 @@ writePTE(PPTE dest, PTE value)
 
     * (volatile PTE *) dest = value;
     
+}
+
+
+BOOLEAN
+trimPTE(PPTE PTEaddress) 
+{
+
+    BOOLEAN wakeModifiedWriter;
+    PTE oldPTE;
+    ULONG_PTR pageNum;
+    PPFNdata PFNtoTrim;
+    PVOID currVA;
+    PTE newPTE;
+
+    if (PTEaddress == NULL) {
+
+        PRINT_ERROR("could not trim - invalid PTE\n");
+        return FALSE;
+
+    }
+    
+
+    wakeModifiedWriter = FALSE;
+
+    //
+    // Acquire PTE lock - although it may also be acquired in trimming function in 
+    // main, the recursive nature of underlying CRITICAL_SECTION locking functionality
+    // permits the re-acquisition of a critical section by the owning thread
+    //
+
+    acquirePTELock(PTEaddress);
+
+    oldPTE = *PTEaddress;
+
+    //
+    // Check if PTE's valid bit is set - if not, can't be trimmed and return failure
+    //
+    
+    if (oldPTE.u1.hPTE.validBit == 0) {
+
+        releasePTELock(PTEaddress);
+
+        PRINT("could not trim - PTE is not valid\n");
+        
+        return FALSE;
+
+    }
+
+    pageNum = oldPTE.u1.hPTE.PFN;
+
+    PFNtoTrim = PFNarray + pageNum;
+
+    ASSERT(PFNtoTrim->statusBits == ACTIVE);
+
+    //
+    // Initialize new PTE to zero
+    //
+
+    newPTE.u1.ulongPTE = 0;
+
+    currVA = (PVOID) ( (ULONG_PTR) leafVABlock + (PTEaddress - PTEarray) *PAGE_SIZE );
+    
+    //
+    // Unmap page from VA (invalidates hardwarePTE)
+    //
+
+    MapUserPhysicalPages(currVA, 1, NULL);
+
+    //
+    // Acquire page lock (prior to viewing/editing PFN fields)
+    //
+
+    acquireJLock(&PFNtoTrim->lockBits);
+
+    //
+    // If write in progress bit is set, set the page status bits to 
+    // signify the modified writer to re-enqueue page. If dirty bit is 
+    // clear, PFN can be re-enqueued to standby. If it is set, PFN has been
+    // remodified and thus remodified bit must be set in addition to 
+    // setting status bits to modified.
+    //
+    // PFN refCount (as a proxy for any finishing reads), must also be checked
+    // similarly
+    //
+
+    if (PFNtoTrim->writeInProgressBit == 1 || PFNtoTrim->refCount != 0) {
+
+        if (oldPTE.u1.hPTE.dirtyBit == 0) {
+
+            PFNtoTrim->statusBits = STANDBY;
+
+        }
+        else {
+            
+            ASSERT(oldPTE.u1.hPTE.dirtyBit == 1);
+
+            //
+            // Notify modified writer that page has been re-modified since initial write began
+            //
+
+            PFNtoTrim->remodifiedBit = 1;
+
+            PFNtoTrim->statusBits = MODIFIED;
+
+        }
+
+    }
+    else {
+
+        //
+        // If refCount is zero, readInProgress bit must also be zero
+        //
+
+        ASSERT(PFNtoTrim->readInProgressBit == 0);
+
+        //
+        // Check dirtyBit to see if page has been modified
+        //
+
+        if (oldPTE.u1.hPTE.dirtyBit == 0 && PFNtoTrim->remodifiedBit == 0) {
+
+            //
+            // Add given VA's page to standby list
+            //
+
+            enqueuePage(&standbyListHead, PFNtoTrim);
+
+        } 
+        else {
+
+            if (PFNtoTrim->pageFileOffset != INVALID_BITARRAY_INDEX) {
+
+                ASSERT(PFNtoTrim->remodifiedBit == 1);
+
+                clearPFBitIndex(PFNtoTrim->pageFileOffset);
+
+                PFNtoTrim->pageFileOffset = INVALID_BITARRAY_INDEX;
+                
+            }
+
+            //
+            // Since PTE dirty bit is set, we can also clear PFN remodified bit and 
+            // enqueue to modified list
+            //
+
+            PFNtoTrim->remodifiedBit = 0;
+
+            //
+            // Add given VA's page to modified list
+            //
+
+            wakeModifiedWriter = enqueuePage(&modifiedListHead, PFNtoTrim);
+
+        }
+    }
+
+    //
+    // Set PTE transitionBit to 1, assign PFN and permissions,
+    // and write out
+    //
+
+    newPTE.u1.tPTE.transitionBit = 1;  
+
+    newPTE.u1.tPTE.PFN = pageNum;
+
+    newPTE.u1.tPTE.permissions = getPTEpermissions(oldPTE);
+
+    writePTE(PTEaddress, newPTE);
+
+    //
+    // Release PFN and PTE lock in order of acquisition
+    //
+
+    releaseJLock(&PFNtoTrim->lockBits);
+
+    releasePTELock(PTEaddress);
+
+    if (wakeModifiedWriter == TRUE) {
+
+        BOOL bRes;
+
+        bRes = SetEvent(wakeModifiedWriterHandle);
+
+        if (bRes != TRUE) {
+
+            PRINT_ERROR("[trimPTE] failed to set event\n");
+
+        }
+
+        ResetEvent(wakeModifiedWriterHandle);
+
+    }
+
+    return TRUE;
+
 }
 
 

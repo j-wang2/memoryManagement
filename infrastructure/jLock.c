@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <windows.h>
 #include "jlock.h"
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
 
 
 

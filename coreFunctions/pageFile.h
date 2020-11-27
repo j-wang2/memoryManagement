@@ -1,7 +1,6 @@
 #ifndef PAGEFILE_H
 #define PAGEFILE_H
 
-// #include "userMode-AWE-pageFile.h"
 
 /*
  * setPFBitIndex: function to set (change from 0 to 1) bit index of pagefile bit array

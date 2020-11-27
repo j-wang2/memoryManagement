@@ -1,8 +1,7 @@
 #ifndef ENQUEUE_DEQUEUE_H
 #define ENQUEUE_DEQUEUE_H
 
-// #include "userMode-AWE-pageFile.h"
-
+#include "../dataStructures/VADNodes.h"
 
 
 /*
@@ -206,5 +205,27 @@ dequeueLockedEvent(PlistData listHead);
  */
 VOID
 enqueueEvent(PlistData listHead, PeventNode eventNode);
+
+
+/*
+ * enqueueVAD: function to enqueue a provided VAD to list
+ *  - VAD list locks (read and write) MUST be held by caller
+ * 
+ * No return value
+ */
+VOID
+enqueueVAD(PlistData listHead, PVADNode newNode);
+
+
+/*
+ * dequeueSpecificVAD: function to dequeue a particular node from list
+ *  - VAD list locks (read and write) MUST be held by caller
+ * 
+ * No return value
+ */
+VOID
+dequeueSpecificVAD(PlistData listHead, PVADNode removeNode);
+
+
 
 #endif

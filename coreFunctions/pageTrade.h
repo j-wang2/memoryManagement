@@ -1,7 +1,7 @@
 #ifndef PAGETRADE_H
 #define PAGETRADE_H
 
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
 
 /*
  * Not currently in use !

@@ -1,10 +1,11 @@
-#include "userMode-AWE-pageFile.h"
-#include "enqueue-dequeue.h" 
-#include "getPage.h"
-#include "PTEpermissions.h"
-#include "jLock.h"
+#include "../usermodeMemoryManager.h"
+#include "../infrastructure/enqueue-dequeue.h" 
+#include "../infrastructure/jLock.h"
+#include "../dataStructures/PTEpermissions.h"
+#include "../dataStructures/VADNodes.h"
 #include "pageFile.h"
-#include "VADNodes.h"
+#include "getPage.h"
+
 
 // Array used to convert PTEpermissions enum to standard windows permissions
 DWORD windowsPermissions[] = { PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE };

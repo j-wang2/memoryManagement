@@ -1,8 +1,8 @@
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
+#include "../infrastructure/enqueue-dequeue.h"
+#include "../infrastructure/bitOps.h"
 #include "VADNodes.h"
-#include "enqueue-dequeue.h"
 #include "PTEpermissions.h"
-#include "bitOps.h"
 #include "VApermissions.h"
 
 
@@ -51,24 +51,6 @@ getVAD(void* virtualAddress)
 
     PRINT(" not in VAD List\n");
     return NULL;
-
-}
-
-
-VOID
-enqueueVAD(PlistData listHead, PVADNode newNode)
-{
-
-    enqueue(&listHead->head, &newNode->links);
-
-}
-
-
-VOID
-dequeueSpecificVAD(PVADNode removeNode)
-{
-
-    dequeueSpecific(&removeNode->links);
 
 }
 
@@ -442,7 +424,7 @@ deleteVAD(void* VA)
     // freeing struct
     //
 
-    dequeueSpecificVAD(removeVAD);
+    dequeueSpecificVAD(&VADListHead, removeVAD);
 
     //
     // Assert that there are no remaining committed pages within it

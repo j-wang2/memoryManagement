@@ -19,7 +19,7 @@
 #define MULTIPLE_MAPPINGS                           // enables multiple mappings
 
 
-/*********** Testing macros ************/
+/*********** Functionality macros ************/
 
 //
 // Toggle VAD type (default is randomized mixture of commit and reserve)
@@ -28,6 +28,11 @@
 // #define COMMIT_VAD  
 // #define RESERVE_VAD
 
+#define ZERO_PAGE_THREAD                                // toggles zero page thread
+#define MODIFIED_WRITER_THREAD                            // toggles modified page writer thread
+
+
+/************* Debugging macros ************/
 //
 // Confirms VAD commit count aligns with PTE statuses
 //
@@ -35,15 +40,14 @@
 #define VAD_COMMIT_CHECK
 
 
-#define CHECK_PFNS
+// #define CHECK_PFNS
 // #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing
                                                 // program to run sans pagefile
 // #define PTE_CHANGE_LOG
 // #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
                                                 // for the pagefile that includes additional information
 #define AV_TEMP_TESTING                                // temporary workaround for PF due to app verifier
-#define TESTING_ZERO                                // toggles zero page thread
-#define TESTING_MODIFIED                            // toggles modified page writer thread
+
 #define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
 #define CONTINUOUS_FAULT_TEST
 // #define TRADE_PAGES                          // deprecated (page trading functionality not up to date with current program)

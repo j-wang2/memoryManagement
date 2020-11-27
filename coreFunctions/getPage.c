@@ -1,15 +1,20 @@
-#include "userMode-AWE-pageFile.h"
-#include "enqueue-dequeue.h"
-#include "jLock.h"
-#include "PTEpermissions.h"
+#include "../usermodeMemoryManager.h"
+#include "../infrastructure/enqueue-dequeue.h"
+#include "../infrastructure/jLock.h"
+#include "../dataStructures/PTEpermissions.h"
 
 PPFNdata
 getZeroPage(BOOLEAN returnLocked)
 {
+
     PPFNdata returnPFN;
+
     if (zeroListHead.count != 0) {
 
+        //
         // get a locked page from the zero list head
+        //
+
         returnPFN = dequeueLockedPage(&zeroListHead, returnLocked);
 
         if (returnPFN == NULL) {

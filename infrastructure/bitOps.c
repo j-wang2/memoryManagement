@@ -1,4 +1,4 @@
-#include "userMode-AWE-pageFile.h"
+#include "../usermodeMemoryManager.h"
 #include "bitOps.h"
 
 #define BITS_PER_FRAME 64
