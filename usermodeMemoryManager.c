@@ -2293,60 +2293,66 @@ testRoutine()
 
     }
 
-
-    PRINT_ALWAYS(" - %d zeroPage threads\n", NUM_THREADS);
-
-    HANDLE zeroPageThreadHandles[NUM_THREADS];
-
-    for (int i = 0; i < NUM_THREADS; i++) {
-
-        zeroPageThreadHandles[i] = CreateThread(NULL, 0, zeroPageThread, terminateWorkingThreadsHandle, 0, NULL);
-            
-        if (zeroPageThreadHandles[i] == INVALID_HANDLE_VALUE) {
-
-            PRINT_ERROR("failed to create zeroPage handle\n");
-
-        }
-  
-    }  
-
-
     #ifdef ZERO_PAGE_THREAD
-    /************ for testing of zeropagethread **************/
 
-    PRINT_ALWAYS(" - %d freePage threads\n", NUM_THREADS);
+        PRINT_ALWAYS(" - %d zeroPage threads\n", NUM_THREADS);
 
-    HANDLE freePageTestThreadHandles[NUM_THREADS];
+        HANDLE zeroPageThreadHandles[NUM_THREADS];
 
-    for (int i = 0; i < NUM_THREADS; i++) {
+        for (int i = 0; i < NUM_THREADS; i++) {
 
-        freePageTestThreadHandles[i] = CreateThread(NULL, 0, freePageTestThread, terminateWorkingThreadsHandle, 0, NULL);
+            zeroPageThreadHandles[i] = CreateThread(NULL, 0, zeroPageThread, terminateWorkingThreadsHandle, 0, NULL);
+                
+            if (zeroPageThreadHandles[i] == INVALID_HANDLE_VALUE) {
 
-        if (freePageTestThreadHandles[i] == INVALID_HANDLE_VALUE) {
+                PRINT_ERROR("failed to create zeroPage handle\n");
 
-            PRINT_ERROR("failed to create freePage handle\n");
+            }
+    
+        }  
+
+    #endif
+
+
+    #ifdef FREE_PAGE_THREAD
+
+        /************ for testing of zeropagethread **************/
+
+        PRINT_ALWAYS(" - %d freePage threads\n", NUM_THREADS);
+
+        HANDLE freePageTestThreadHandles[NUM_THREADS];
+
+        for (int i = 0; i < NUM_THREADS; i++) {
+
+            freePageTestThreadHandles[i] = CreateThread(NULL, 0, freePageTestThread, terminateWorkingThreadsHandle, 0, NULL);
+
+            if (freePageTestThreadHandles[i] == INVALID_HANDLE_VALUE) {
+
+                PRINT_ERROR("failed to create freePage handle\n");
+
+            }
 
         }
 
-    }
     #endif
 
     #ifdef MODIFIED_WRITER_THREAD
 
-    PRINT_ALWAYS(" - %d modifiedWriter threads\n", NUM_THREADS);
+        PRINT_ALWAYS(" - %d modifiedWriter threads\n", NUM_THREADS);
 
-    HANDLE modifiedPageWriterThreadHandles[NUM_THREADS];
-    for (int i = 0; i < NUM_THREADS; i++) {
+        HANDLE modifiedPageWriterThreadHandles[NUM_THREADS];
+        for (int i = 0; i < NUM_THREADS; i++) {
 
-        modifiedPageWriterThreadHandles[i] = CreateThread(NULL, 0, modifiedPageThread, terminateWorkingThreadsHandle, 0, NULL);
-            
-        if (modifiedPageWriterThreadHandles[i] == INVALID_HANDLE_VALUE) {
+            modifiedPageWriterThreadHandles[i] = CreateThread(NULL, 0, modifiedPageThread, terminateWorkingThreadsHandle, 0, NULL);
+                
+            if (modifiedPageWriterThreadHandles[i] == INVALID_HANDLE_VALUE) {
 
-            PRINT_ERROR("failed to create modifiedPageWriting handle\n");
+                PRINT_ERROR("failed to create modifiedPageWriting handle\n");
 
+            }
+    
         }
-  
-    }
+        
     #endif
 
     PRINT_ALWAYS(" - %d PTE trimming threads\n", NUM_THREADS);
@@ -2444,9 +2450,13 @@ testRoutine()
 
     SetEvent(terminateWorkingThreadsHandle);
 
-    WaitForMultipleObjects(NUM_THREADS, zeroPageThreadHandles, TRUE, INFINITE);
-
     #ifdef ZERO_PAGE_THREAD
+
+        WaitForMultipleObjects(NUM_THREADS, zeroPageThreadHandles, TRUE, INFINITE);
+
+    #endif
+
+    #ifdef FREE_PAGE_THREAD
 
         WaitForMultipleObjects(NUM_THREADS, freePageTestThreadHandles, TRUE, INFINITE);
     

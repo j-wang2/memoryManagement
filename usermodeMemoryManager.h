@@ -12,14 +12,13 @@
 #pragma comment(lib, "MinCore.lib")
 
 
-/******** Key functionality macros ********/
+/********************************************************************
+ ***************** Key functionality macros ************************
+ *******************************************************************/
 
 #define MULTITHREADING
 #define NUM_THREADS 5
-#define MULTIPLE_MAPPINGS                           // enables multiple mappings
-
-
-/*********** Functionality macros ************/
+#define MULTIPLE_MAPPINGS                               // enables multiple mappings
 
 //
 // Toggle VAD type (default is randomized mixture of commit and reserve)
@@ -28,76 +27,97 @@
 // #define COMMIT_VAD  
 // #define RESERVE_VAD
 
+//
+// Toggle thread functionality (free page thread exists only to artificially
+// increase program load)
+//
+
 #define ZERO_PAGE_THREAD                                // toggles zero page thread
-#define MODIFIED_WRITER_THREAD                            // toggles modified page writer thread
+
+#define FREE_PAGE_THREAD                                // toggles free page TESTING thread 
+
+#define MODIFIED_WRITER_THREAD                          // toggles modified page writer thread
+
+#define CONTINUOUS_FAULT_TEST
 
 
-/************* Debugging macros ************/
-//
-// Confirms VAD commit count aligns with PTE statuses
-//
+/************************************************************************
+************************* Debugging macros ****************************
+ ************************************************************************/
 
-#define VAD_COMMIT_CHECK
-
-
-// #define CHECK_PFNS
-// #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing
-                                                // program to run sans pagefile
-// #define PTE_CHANGE_LOG
-// #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement
-                                                // for the pagefile that includes additional information
 #define AV_TEMP_TESTING                                // temporary workaround for PF due to app verifier
 
 #define TESTING_VERIFY_ADDRESSES                    // tests addresses that are written on decommit
-#define CONTINUOUS_FAULT_TEST
+
+#define VAD_COMMIT_CHECK                    // Confirms VAD commit count aligns with PTE statuses
+
+// #define CHECK_PFNS
+
+// #define PAGEFILE_OFF                            // Fills pagefile slots and bitarray, allowing program to run sans pagefile
+
+// #define PTE_CHANGE_LOG
+
+// #define PAGEFILE_PFN_CHECK                      // When toggled on, enables a debugging replacement for the pagefile that includes additional information
+
 // #define TRADE_PAGES                          // deprecated (page trading functionality not up to date with current program)
 
 
-/*********** number of physical memory pages to allocate (+ PF pages for total memory) **********/
-// #define NUM_PAGES 64
+/***************************************************************************
+ * number of physical memory pages to allocate (+ PF pages for total memory)
+ ***************************************************************************/
+
 #define NUM_PAGES 512
-// #define NUM_PAGES 2048
-// #define NUM_PAGES 512*8  
-// #define NUM_PAGES 640000
 
 #define MIN_AVAILABLE_PAGES 100
 
-#define VM_MULTIPLIER 2                          // VM space is this many times larger than num physical pages successfully allocated
+#define VM_MULTIPLIER 2                             // VM space is this many times larger than num physical pages successfully allocated
 
 
-/********** PTE bit macros *************/
+/****************************************************************************
+ ******************************** PTE macros ********************************
+ ***************************************************************************/
+
 #define PERMISSIONS_BITS 3                          // bits in non-valid PTE formats reserved for permissions
 
 #define PTE_INDEX_BITS 12                           // number of bits to store PTE index (tied to # of VM pages)
 
-#define PFN_BITS 40                                 // number of bits to store PFN index (tied to physical pages returned)
+#define PFN_BITS 40                                 // number of bits to store PFN index (tied to physical pages returned)\
+
+#define PAGES_PER_LOCK 64                           // Defines granularity of PTE locking (does not have to be a factor of total pages)
 
 
-/************ page size macros ***********/
+/**************************************************************************
+ *************************** page size macros *********************&&&&&&&**
+ **************************************************************************/
+
 #define PAGE_SIZE 4096                              // page size
+
 #define PAGE_SHIFT 12                               // number of bits to multiply/divide by page size (log2 page size)
 
 
-/*********** pagefile macros ***************************/
+/************************************************************************
+ ************************** pagefile macros *****************************
+ ***********************************************************************/
+
 #define PAGEFILE_PAGES 512                          // capacity of pagefile pages (+ NUM_PAGES for total memory)
+
 #define PAGEFILE_SIZE PAGEFILE_PAGES*PAGE_SIZE      // total pagefile size 
+
 #define PAGEFILE_BITS 20                            // actually 2^19 currently
+
 #define INVALID_BITARRAY_INDEX 0xfffff              // 20 bits (MUST CORRESPOND TO PAGEFILE BITS)
 
-//
-// Defines granularity of PTE locking (does not have to be a factor of total pages)
-//
 
-#define PAGES_PER_LOCK 64
+/***********************************************************************
+ *********************** assert and print macros ***********************
+ ***********************************************************************/
 
-
-/**************** assert macro *****************/
 #define ASSERT(x) if((x) == FALSE) DebugBreak()
 
-
-/***************** print macros ******************/
 #define PRINT(fmt, ...) if (debugMode == TRUE) { printf(fmt, __VA_ARGS__); }
+
 #define PRINT_ERROR(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__); ASSERT(FALSE); 
+
 #define PRINT_ALWAYS(fmt, ...) printf(fmt, __VA_ARGS__)
 
 
@@ -220,16 +240,10 @@ typedef enum {
 typedef enum {
     // acquired first
     PTE_LOCK,
-
-    VAD_LOCK,       // pte lock acquired first
-
+    VAD_LOCK,
     PAGE_LOCK,
-
     LIST_LOCK,
-
     PAGEFILE_LOCK,
-
-
 } lockOrder;
 
 
@@ -250,25 +264,34 @@ extern ULONG_PTR totalMemoryPageLimit;     // limit of committed pages (memory b
 extern void* pageFileVABlock;              // starting address of pagefile "disk" (memory)
 
 #ifdef PAGEFILE_PFN_CHECK
-typedef struct _pageFileDebug {
-    PPTE currPTE;
-    PPFNdata currPFN;
-    PTE PTEdata;
-    PFNdata PFNdata;
-} pageFileDebug, *PPageFileDebug;
-extern PPageFileDebug pageFileDebugArray;
+
+    typedef struct _pageFileDebug {
+        PPTE currPTE;
+        PPFNdata currPFN;
+        PTE PTEdata;
+        PFNdata PFNdata;
+    } pageFileDebug, *PPageFileDebug;
+    extern PPageFileDebug pageFileDebugArray;
+
 #else
-extern ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
+
+    extern ULONG_PTR pageFileBitArray[PAGEFILE_PAGES/(8*sizeof(ULONG_PTR))];
+    
 #endif
 
+//
 // Execute-Write-Read (bit ordering)
+//
+
 extern ULONG_PTR permissionMasks[];
 #define readMask (1 << 0)                   // 1
 #define writeMask (1 << 1)                  // 2
 #define executeMask (1 << 2)                // 4
 
-
+//
 // listHeads array
+//
+
 extern listData listHeads[ACTIVE];
 #define zeroListHead listHeads[ZERO]
 #define freeListHead listHeads[FREE]
